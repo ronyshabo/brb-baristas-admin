@@ -1,0 +1,48 @@
+name: Deploy brb-baristas
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v3
+
+      - name: Build Docker image
+        run: |
+          docker build -t brb-baristas:latest .
+
+      - name: Deploy to AWS EC2
+        env:
+          EC2_HOST: ${{ secrets.EC2_HOST }}
+          EC2_USER: ${{ secrets.EC2_USER }}
+          EC2_SSH_KEY: ${{ secrets.EC2_SSH_KEY }}
+        run: |
+          mkdir -p ~/.ssh
+          echo "$EC2_SSH_KEY" > ~/.ssh/id_rsa
+          chmod 600 ~/.ssh/id_rsa
+          ssh-keyscan -H $EC2_HOST >> ~/.ssh/known_hosts
+          
+          # Save docker image as tar
+          docker save brb-baristas:latest > brb-baristas.tar
+          
+          # Copy to EC2
+          scp -i ~/.ssh/id_rsa brb-baristas.tar $EC2_USER@$EC2_HOST:/tmp/
+          
+          # Load, stop old container, run new one
+          ssh -i ~/.ssh/id_rsa $EC2_USER@$EC2_HOST << 'EOF'
+          docker load < /tmp/brb-baristas.tar
+          docker stop brb-baristas-prod || true
+          docker rm brb-baristas-prod || true
+          docker run -d \
+            --name brb-baristas-prod \
+            -p 127.0.0.1:3001:80 \
+            -e VITE_FIREBASE_API_KEY=${{ secrets.FIREBASE_API_KEY }} \
+            -e VITE_FIREBASE_PROJECT_ID=${{ secrets.FIREBASE_PROJECT_ID }} \
+            brb-baristas:latest
+          docker exec brb-caddy caddy reload -c /etc/caddy/Caddyfile
+          EOF

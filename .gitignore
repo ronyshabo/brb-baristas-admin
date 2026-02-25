@@ -1,0 +1,10 @@
+node_modules
+dist
+.DS_Store
+*.local
+*.pem
+.env
+.env.*.local
+serviceAccountKey.json
+.vscode
+.idea
