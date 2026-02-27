@@ -49,6 +49,9 @@ function EventsTab({ user, accessToken }) {
   })
 
   const calendarId = import.meta.env.VITE_GOOGLE_CALENDAR_ID
+  const signupBaseUrl =
+    import.meta.env.VITE_SIGNUP_BASE_URL ||
+    (typeof window !== 'undefined' ? window.location.origin : '')
 
   // TODO: Fetch events from Firestore on component mount
   useEffect(() => {
@@ -218,7 +221,7 @@ function EventsTab({ user, accessToken }) {
       
       await setDoc(doc(db, 'invitations', customInvId), invitationData)
 
-      const link = `http://localhost:5174/signup?token=${token}`
+      const link = `${signupBaseUrl}/signup?token=${token}`
       setGeneratedLink({ link, token })
     } catch (err) {
       console.error('Error generating link:', err)

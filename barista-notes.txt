@@ -1,0 +1,10 @@
+SSH into your AWS EC2 instance
+ssh -i brb-key.pem ubuntu@18.191.96.186
+
+Clone the GitHub repo
+
+Create .env.local with your secrets
+
+Build and run Docker:
+docker build -t brb-admin .
+docker run -p 80:80 brb-admin
