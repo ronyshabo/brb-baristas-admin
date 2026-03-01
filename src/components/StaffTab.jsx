@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { collection, addDoc, getDocs, query, orderBy, where, doc, updateDoc, deleteDoc } from 'firebase/firestore'
+import { collection, addDoc, getDocs, query, orderBy, doc, updateDoc, deleteDoc } from 'firebase/firestore'
 import { db } from '../firebase/config'
 import '../styles/StaffTab.css'
 
@@ -16,14 +16,42 @@ function StaffTab({ user, accessToken }) {
   const [reports, setReports] = useState([])
   const [newBarista, setNewBarista] = useState({ name: '', basePay: '' })
   const [editingBarista, setEditingBarista] = useState(null)
+  const [syncingBaristas, setSyncingBaristas] = useState(false)
+  const [hasAutoSyncedMonth, setHasAutoSyncedMonth] = useState(false)
 
   const calendarId = import.meta.env.VITE_GOOGLE_CALENDAR_ID
+
+  const formatDateKey = (date) => {
+    const year = date.getFullYear()
+    const month = String(date.getMonth() + 1).padStart(2, '0')
+    const day = String(date.getDate()).padStart(2, '0')
+    return `${year}-${month}-${day}`
+  }
+
+  const parseDateInput = (value) => {
+    const [year, month, day] = value.split('-').map(Number)
+    return new Date(year, month - 1, day)
+  }
+
+  const getSundayOfWeek = (date) => {
+    const sunday = new Date(date)
+    sunday.setDate(sunday.getDate() - sunday.getDay())
+    sunday.setHours(0, 0, 0, 0)
+    return sunday
+  }
 
   // Fetch baristas from Firestore on mount
   useEffect(() => {
     fetchBaristas()
     fetchReports()
   }, [])
+
+  useEffect(() => {
+    if (view === 'baristas' && accessToken && baristas.length === 0 && !hasAutoSyncedMonth) {
+      setHasAutoSyncedMonth(true)
+      syncBaristasFromCurrentMonth(false)
+    }
+  }, [view, accessToken, baristas.length, hasAutoSyncedMonth])
 
   const fetchBaristas = async () => {
     try {
@@ -99,6 +127,73 @@ function StaffTab({ user, accessToken }) {
     }
   }
 
+  const syncBaristasFromCurrentMonth = async (showAlert = true) => {
+    if (!accessToken) {
+      if (showAlert) alert('Please connect Google first to sync baristas from calendar')
+      return
+    }
+
+    setSyncingBaristas(true)
+    try {
+      const now = new Date()
+      const monthStart = new Date(now.getFullYear(), now.getMonth(), 1)
+      const nextMonthStart = new Date(now.getFullYear(), now.getMonth() + 1, 1)
+
+      const url = `https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(
+        calendarId
+      )}/events?timeMin=${monthStart.toISOString()}&timeMax=${nextMonthStart.toISOString()}&singleEvents=true&orderBy=startTime`
+
+      const response = await fetch(url, {
+        headers: { Authorization: `Bearer ${accessToken}` }
+      })
+
+      const data = await response.json()
+      if (!response.ok) throw new Error('Failed to fetch calendar events')
+
+      const namesFromCalendar = new Set()
+      ;(data.items || []).forEach((event) => {
+        if (!event?.summary) return
+        const bracketMatch = event.summary.match(/^\[([^,]+),\s*([^\]]+)\]/)
+        if (!bracketMatch) return
+        const baristaName = bracketMatch[1].trim()
+        if (baristaName) namesFromCalendar.add(baristaName)
+      })
+
+      const existingNames = new Set(baristas.map((b) => b.name.trim().toLowerCase()))
+      const namesToCreate = [...namesFromCalendar].filter(
+        (name) => !existingNames.has(name.trim().toLowerCase())
+      )
+
+      await Promise.all(
+        namesToCreate.map((name) =>
+          addDoc(collection(db, 'baristas'), {
+            name,
+            basePay: 0,
+            active: true,
+            autoImported: true,
+            createdAt: new Date(),
+            createdBy: user?.uid || 'system'
+          })
+        )
+      )
+
+      await fetchBaristas()
+
+      if (showAlert) {
+        if (namesToCreate.length > 0) {
+          alert(`Imported ${namesToCreate.length} baristas from ${now.toLocaleString('en-US', { month: 'long' })} schedule.`)
+        } else {
+          alert('All current month baristas are already listed.')
+        }
+      }
+    } catch (err) {
+      console.error('Error syncing baristas:', err)
+      if (showAlert) alert('Failed to sync baristas from calendar')
+    } finally {
+      setSyncingBaristas(false)
+    }
+  }
+
   const fetchWeekSchedule = async () => {
     if (!selectedWeek || !accessToken) {
       alert('Please select a week and ensure you are logged in with Google')
@@ -107,7 +202,7 @@ function StaffTab({ user, accessToken }) {
 
     setLoading(true)
     try {
-      const weekStart = new Date(selectedWeek)
+      const weekStart = getSundayOfWeek(parseDateInput(selectedWeek))
       const weekEnd = new Date(weekStart)
       weekEnd.setDate(weekEnd.getDate() + 7)
 
@@ -125,6 +220,7 @@ function StaffTab({ user, accessToken }) {
       // Process schedule by day
       const schedule = processSchedule(data.items, weekStart)
       setWeekSchedule(schedule)
+      setSelectedWeek(formatDateKey(weekStart))
       alert('Schedule loaded successfully!')
     } catch (err) {
       console.error('Error fetching schedule:', err)
@@ -140,7 +236,7 @@ function StaffTab({ user, accessToken }) {
     for (let i = 0; i < 7; i++) {
       const currentDay = new Date(weekStart)
       currentDay.setDate(currentDay.getDate() + i)
-      const dateKey = currentDay.toISOString().split('T')[0]
+      const dateKey = formatDateKey(currentDay)
       
       schedule[dateKey] = {
         morning: [], // 8am-2pm
@@ -157,27 +253,56 @@ function StaffTab({ user, accessToken }) {
       if (!bracketMatch) return // Skip non-staff events
       
       const baristaName = bracketMatch[1].trim()
+      const shiftType = bracketMatch[2].trim().toLowerCase()
       const startTime = new Date(event.start.dateTime)
       const endTime = new Date(event.end.dateTime)
-      const dateKey = startTime.toISOString().split('T')[0]
+      const dateKey = formatDateKey(startTime)
       
       if (!schedule[dateKey]) return
 
       const startHour = startTime.getHours()
       const endHour = endTime.getHours()
 
+      // Prioritize explicit shift labels in calendar summaries
+      if (shiftType.includes('opening') || shiftType.includes('open')) {
+        if (!schedule[dateKey].morning.includes(baristaName)) {
+          schedule[dateKey].morning.push(baristaName)
+        }
+        return
+      }
+
+      if (shiftType.includes('closing') || shiftType.includes('close')) {
+        if (!schedule[dateKey].evening.includes(baristaName)) {
+          schedule[dateKey].evening.push(baristaName)
+        }
+        return
+      }
+
+      if (shiftType.includes('shared') || shiftType.includes('support') || shiftType.includes('inter')) {
+        if (!schedule[dateKey].interShift.includes(baristaName)) {
+          schedule[dateKey].interShift.push(baristaName)
+        }
+        return
+      }
+
       // Determine shift type based on start and end times
-      // Morning shift: starts at or before 9am and ends around 2pm-3pm
+      // Morning shift: starts at 8am, and fallback to 9am for weekend openings
       if (startHour <= 9 && endHour >= 13 && endHour <= 15) {
-        schedule[dateKey].morning.push(baristaName)
+        if (!schedule[dateKey].morning.includes(baristaName)) {
+          schedule[dateKey].morning.push(baristaName)
+        }
       }
       // Evening shift: starts around 2pm and ends at or after 8pm
       else if (startHour >= 13 && startHour <= 15 && endHour >= 20) {
-        schedule[dateKey].evening.push(baristaName)
+        if (!schedule[dateKey].evening.includes(baristaName)) {
+          schedule[dateKey].evening.push(baristaName)
+        }
       }
       // Inter-shift: starts around noon and ends around 6pm (doesn't span full shifts)
       else if (startHour >= 11 && startHour <= 13 && endHour >= 17 && endHour <= 19) {
-        schedule[dateKey].interShift.push(baristaName)
+        if (!schedule[dateKey].interShift.includes(baristaName)) {
+          schedule[dateKey].interShift.push(baristaName)
+        }
       }
     })
 
@@ -194,7 +319,7 @@ function StaffTab({ user, accessToken }) {
       const amountMatch = line.match(/\$(\d+\.\d{2})/)
       
       if (dateMatch && amountMatch) {
-        const dateStr = new Date(dateMatch[1]).toISOString().split('T')[0]
+        const dateStr = formatDateKey(new Date(dateMatch[1]))
         tips[dateStr] = parseFloat(amountMatch[1])
       }
     })
@@ -265,7 +390,7 @@ function StaffTab({ user, accessToken }) {
 
     setCalculation({
       weekStart: selectedWeek,
-      weekEnd: new Date(new Date(selectedWeek).getTime() + 7 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
+      weekEnd: formatDateKey(new Date(parseDateInput(selectedWeek).getTime() + 6 * 24 * 60 * 60 * 1000)),
       earnings: baristaEarnings,
       totalTips: Object.values(dailyTips).reduce((sum, tip) => sum + tip, 0)
     })
@@ -313,11 +438,14 @@ function StaffTab({ user, accessToken }) {
           <h3>Weekly Tip Calculator</h3>
           
           <div className="form-group">
-            <label>Select Week Start Date (Monday):</label>
+            <label>Select Week Start Date (Sunday):</label>
             <input 
               type="date" 
               value={selectedWeek} 
-              onChange={(e) => setSelectedWeek(e.target.value)}
+              onChange={(e) => {
+                const sunday = getSundayOfWeek(parseDateInput(e.target.value))
+                setSelectedWeek(formatDateKey(sunday))
+              }}
             />
             <button onClick={fetchWeekSchedule} disabled={loading}>
               {loading ? 'Loading...' : 'Load Schedule from Calendar'}
@@ -439,13 +567,16 @@ function StaffTab({ user, accessToken }) {
                 onChange={(e) => setNewBarista({...newBarista, basePay: e.target.value})}
               />
               <button onClick={addBarista} className="add-btn">Add Barista</button>
+              <button onClick={() => syncBaristasFromCurrentMonth(true)} className="add-btn" disabled={syncingBaristas}>
+                {syncingBaristas ? 'Syncing...' : 'Sync From Current Month Calendar'}
+              </button>
             </div>
           </div>
 
           <div className="barista-list">
             <h4>Current Baristas ({baristas.length})</h4>
             {baristas.length === 0 ? (
-              <p className="empty-state">No baristas yet. Add your first barista above!</p>
+              <p className="empty-state">No baristas found yet. Use “Sync From Current Month Calendar” to auto-load scheduled baristas.</p>
             ) : (
               <table className="barista-table">
                 <thead>
