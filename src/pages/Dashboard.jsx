@@ -40,7 +40,7 @@ function Dashboard({ user, googleAccessToken }) {
         {activeTab === 'events' && <EventsTab user={user} accessToken={googleAccessToken} />}
         {activeTab === 'bookings' && <BookingsTab accessToken={googleAccessToken} />}
         {activeTab === 'calendar' && <CalendarTab accessToken={googleAccessToken} />}
-        {activeTab === 'staff' && <StaffTab user={user} />}
+        {activeTab === 'staff' && <StaffTab user={user} accessToken={googleAccessToken} />}
       </div>
     </div>
   )
