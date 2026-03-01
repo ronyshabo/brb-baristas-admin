@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { collection, addDoc, getDocs, query, orderBy, doc, updateDoc, deleteDoc } from 'firebase/firestore'
+import { collection, addDoc, getDocs, query, orderBy, doc, updateDoc, deleteDoc, setDoc } from 'firebase/firestore'
 import { db } from '../firebase/config'
 import '../styles/StaffTab.css'
 
@@ -464,7 +464,10 @@ function StaffTab({ user, accessToken }) {
     }
 
     try {
-      await addDoc(collection(db, 'tipReports'), {
+      // Create document ID based on week start date: "week-2026-02-15"
+      const docId = `week-${calculation.weekStart}`
+      
+      await setDoc(doc(db, 'tipReports', docId), {
         ...calculation,
         createdAt: new Date(),
         createdBy: user.uid
