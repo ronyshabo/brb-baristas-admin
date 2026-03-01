@@ -330,14 +330,180 @@
 
 .baristas-section h3 {
   color: #2c3e50;
+  margin-bottom: 1.5rem;
+}
+
+.add-barista-form {
+  background: #f8f9fa;
+  padding: 1.5rem;
+  border-radius: 8px;
+  margin-bottom: 2rem;
+}
+
+.add-barista-form h4 {
+  color: #2c3e50;
   margin-bottom: 1rem;
 }
 
-.barista-list {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));
-  gap: 1.5rem;
-  margin-top: 2rem;
+.form-inputs {
+  display: flex;
+  gap: 1rem;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.form-inputs input {
+  padding: 0.75rem;
+  border: 2px solid #ddd;
+  border-radius: 8px;
+  font-size: 1rem;
+  flex: 1;
+  min-width: 200px;
+}
+
+.form-inputs .add-btn {
+  padding: 0.75rem 1.5rem;
+  background: #27ae60;
+  color: white;
+  border: none;
+  border-radius: 8px;
+  cursor: pointer;
+  font-size: 1rem;
+  font-weight: 600;
+  transition: background 0.3s;
+}
+
+.form-inputs .add-btn:hover {
+  background: #229954;
+}
+
+.barista-list h4 {
+  color: #2c3e50;
+  margin-bottom: 1rem;
+}
+
+.empty-state {
+  color: #7f8c8d;
+  text-align: center;
+  padding: 2rem;
+  font-style: italic;
+}
+
+.barista-table {
+  width: 100%;
+  border-collapse: collapse;
+  background: white;
+  border-radius: 8px;
+  overflow: hidden;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+}
+
+.barista-table thead {
+  background: #3498db;
+  color: white;
+}
+
+.barista-table th {
+  padding: 1rem;
+  text-align: left;
+  font-weight: 600;
+  text-transform: uppercase;
+  font-size: 0.9rem;
+  letter-spacing: 0.5px;
+}
+
+.barista-table td {
+  padding: 1rem;
+  border-bottom: 1px solid #ecf0f1;
+  color: #34495e;
+}
+
+.barista-table tbody tr:hover {
+  background: #f8f9fa;
+}
+
+.barista-table td strong {
+  color: #2c3e50;
+  font-size: 1.1rem;
+}
+
+.edit-pay {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+}
+
+.edit-pay input {
+  padding: 0.5rem;
+  border: 2px solid #3498db;
+  border-radius: 6px;
+  width: 120px;
+  font-size: 1rem;
+}
+
+.edit-pay .save-btn {
+  padding: 0.5rem 1rem;
+  background: #27ae60;
+  color: white;
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 0.9rem;
+  transition: background 0.3s;
+}
+
+.edit-pay .save-btn:hover {
+  background: #229954;
+}
+
+.edit-pay .cancel-btn {
+  padding: 0.5rem 1rem;
+  background: #95a5a6;
+  color: white;
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 0.9rem;
+  transition: background 0.3s;
+}
+
+.edit-pay .cancel-btn:hover {
+  background: #7f8c8d;
+}
+
+.action-buttons {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.action-buttons .edit-btn {
+  padding: 0.5rem 1rem;
+  background: #3498db;
+  color: white;
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 0.9rem;
+  transition: background 0.3s;
+}
+
+.action-buttons .edit-btn:hover {
+  background: #2980b9;
+}
+
+.action-buttons .remove-btn {
+  padding: 0.5rem 1rem;
+  background: #e74c3c;
+  color: white;
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 0.9rem;
+  transition: background 0.3s;
+}
+
+.action-buttons .remove-btn:hover {
+  background: #c0392b;
 }
 
 .barista-card {

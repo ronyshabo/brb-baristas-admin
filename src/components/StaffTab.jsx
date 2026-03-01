@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { collection, addDoc, getDocs, query, orderBy, where } from 'firebase/firestore'
+import { collection, addDoc, getDocs, query, orderBy, where, doc, updateDoc, deleteDoc } from 'firebase/firestore'
 import { db } from '../firebase/config'
 import '../styles/StaffTab.css'
 
@@ -14,6 +14,8 @@ function StaffTab({ user, accessToken }) {
   const [loading, setLoading] = useState(false)
   const [calculation, setCalculation] = useState(null)
   const [reports, setReports] = useState([])
+  const [newBarista, setNewBarista] = useState({ name: '', basePay: '' })
+  const [editingBarista, setEditingBarista] = useState(null)
 
   const calendarId = import.meta.env.VITE_GOOGLE_CALENDAR_ID
 
@@ -42,6 +44,58 @@ function StaffTab({ user, accessToken }) {
       setReports(reportList)
     } catch (err) {
       console.error('Error fetching reports:', err)
+    }
+  }
+
+  const addBarista = async () => {
+    if (!newBarista.name || !newBarista.basePay) {
+      alert('Please enter barista name and base pay')
+      return
+    }
+
+    try {
+      await addDoc(collection(db, 'baristas'), {
+        name: newBarista.name,
+        basePay: parseFloat(newBarista.basePay),
+        active: true,
+        createdAt: new Date(),
+        createdBy: user.uid
+      })
+      setNewBarista({ name: '', basePay: '' })
+      fetchBaristas()
+      alert('Barista added successfully!')
+    } catch (err) {
+      console.error('Error adding barista:', err)
+      alert('Failed to add barista')
+    }
+  }
+
+  const updateBaristaBasePay = async (baristaId, newBasePay) => {
+    try {
+      await updateDoc(doc(db, 'baristas', baristaId), {
+        basePay: parseFloat(newBasePay)
+      })
+      fetchBaristas()
+      setEditingBarista(null)
+      alert('Base pay updated successfully!')
+    } catch (err) {
+      console.error('Error updating barista:', err)
+      alert('Failed to update base pay')
+    }
+  }
+
+  const removeBarista = async (baristaId, baristaName) => {
+    if (!confirm(`Are you sure you want to remove ${baristaName}? This action cannot be undone.`)) {
+      return
+    }
+
+    try {
+      await deleteDoc(doc(db, 'baristas', baristaId))
+      fetchBaristas()
+      alert('Barista removed successfully!')
+    } catch (err) {
+      console.error('Error removing barista:', err)
+      alert('Failed to remove barista')
     }
   }
 
@@ -96,26 +150,33 @@ function StaffTab({ user, accessToken }) {
     }
 
     events.forEach(event => {
-      if (!event.start?.dateTime) return
+      if (!event.start?.dateTime || !event.summary) return
       
+      // Only process events with format [Name, Shift Type]
+      const bracketMatch = event.summary.match(/^\[([^,]+),\s*([^\]]+)\]/)
+      if (!bracketMatch) return // Skip non-staff events
+      
+      const baristaName = bracketMatch[1].trim()
       const startTime = new Date(event.start.dateTime)
       const endTime = new Date(event.end.dateTime)
       const dateKey = startTime.toISOString().split('T')[0]
       
       if (!schedule[dateKey]) return
 
-      const baristaName = event.summary || 'Unknown'
       const startHour = startTime.getHours()
       const endHour = endTime.getHours()
 
-      // Determine shift type
-      if (startHour <= 8 && endHour >= 14) {
+      // Determine shift type based on start and end times
+      // Morning shift: starts at or before 9am and ends around 2pm-3pm
+      if (startHour <= 9 && endHour >= 13 && endHour <= 15) {
         schedule[dateKey].morning.push(baristaName)
       }
-      if (startHour <= 14 && endHour >= 21) {
+      // Evening shift: starts around 2pm and ends at or after 8pm
+      else if (startHour >= 13 && startHour <= 15 && endHour >= 20) {
         schedule[dateKey].evening.push(baristaName)
       }
-      if (startHour >= 12 && endHour <= 18) {
+      // Inter-shift: starts around noon and ends around 6pm (doesn't span full shifts)
+      else if (startHour >= 11 && startHour <= 13 && endHour >= 17 && endHour <= 19) {
         schedule[dateKey].interShift.push(baristaName)
       }
     })
@@ -359,19 +420,99 @@ function StaffTab({ user, accessToken }) {
 
       {view === 'baristas' && (
         <div className="baristas-section">
-          <h3>Manage Baristas</h3>
-          <p>Add and manage barista base pay rates</p>
-          <div className="barista-list">
-            {baristas.map(barista => (
-              <div key={barista.id} className="barista-card">
-                <h4>{barista.name}</h4>
-                <p>Base Pay: ${barista.basePay || 0}/shift</p>
-              </div>
-            ))}
+          <h3>Manage Baristas - {new Date().toLocaleDateString('en-US', { month: 'long', year: 'numeric' })}</h3>
+          
+          <div className="add-barista-form">
+            <h4>Add New Barista</h4>
+            <div className="form-inputs">
+              <input 
+                type="text" 
+                placeholder="Barista Name"
+                value={newBarista.name}
+                onChange={(e) => setNewBarista({...newBarista, name: e.target.value})}
+              />
+              <input 
+                type="number" 
+                step="0.01"
+                placeholder="Base Pay per Shift ($)"
+                value={newBarista.basePay}
+                onChange={(e) => setNewBarista({...newBarista, basePay: e.target.value})}
+              />
+              <button onClick={addBarista} className="add-btn">Add Barista</button>
+            </div>
           </div>
-          <p style={{color: '#7f8c8d', marginTop: '2rem'}}>
-            Feature coming soon: Add/edit baristas and set base pay rates
-          </p>
+
+          <div className="barista-list">
+            <h4>Current Baristas ({baristas.length})</h4>
+            {baristas.length === 0 ? (
+              <p className="empty-state">No baristas yet. Add your first barista above!</p>
+            ) : (
+              <table className="barista-table">
+                <thead>
+                  <tr>
+                    <th>Name</th>
+                    <th>Base Pay (per shift)</th>
+                    <th>Actions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {baristas.map(barista => (
+                    <tr key={barista.id}>
+                      <td><strong>{barista.name}</strong></td>
+                      <td>
+                        {editingBarista === barista.id ? (
+                          <div className="edit-pay">
+                            <input 
+                              type="number"
+                              step="0.01"
+                              defaultValue={barista.basePay}
+                              id={`edit-${barista.id}`}
+                              autoFocus
+                            />
+                            <button 
+                              onClick={() => {
+                                const newPay = document.getElementById(`edit-${barista.id}`).value
+                                updateBaristaBasePay(barista.id, newPay)
+                              }}
+                              className="save-btn"
+                            >
+                              Save
+                            </button>
+                            <button 
+                              onClick={() => setEditingBarista(null)}
+                              className="cancel-btn"
+                            >
+                              Cancel
+                            </button>
+                          </div>
+                        ) : (
+                          <span>${barista.basePay?.toFixed(2) || '0.00'}</span>
+                        )}
+                      </td>
+                      <td>
+                        <div className="action-buttons">
+                          {editingBarista !== barista.id && (
+                            <button 
+                              onClick={() => setEditingBarista(barista.id)}
+                              className="edit-btn"
+                            >
+                              Edit Pay
+                            </button>
+                          )}
+                          <button 
+                            onClick={() => removeBarista(barista.id, barista.name)}
+                            className="remove-btn"
+                          >
+                            Remove
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+          </div>
         </div>
       )}
 
