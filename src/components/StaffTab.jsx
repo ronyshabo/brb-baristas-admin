@@ -458,7 +458,7 @@ function StaffTab({ user, accessToken }) {
                 <h4>Schedule Preview</h4>
                 {Object.keys(weekSchedule).map(date => (
                   <div key={date} className="day-schedule">
-                    <strong>{new Date(date).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })}</strong>
+                    <strong>{parseDateInput(date).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })}</strong>
                     <div>Morning (8am-2pm): {weekSchedule[date].morning.join(', ') || 'None'}</div>
                     <div>Evening (2pm-9pm): {weekSchedule[date].evening.join(', ') || 'None'}</div>
                     <div>Inter-shift (12pm-6pm): {weekSchedule[date].interShift.join(', ') || 'None'}</div>
@@ -481,7 +481,7 @@ function StaffTab({ user, accessToken }) {
                   <div className="manual-entry">
                     {Object.keys(weekSchedule).map(date => (
                       <div key={date} className="daily-tip-input">
-                        <label>{new Date(date).toLocaleDateString()}:</label>
+                        <label>{parseDateInput(date).toLocaleDateString()}:</label>
                         <input 
                           type="number" 
                           step="0.01"
