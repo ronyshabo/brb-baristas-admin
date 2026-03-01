@@ -310,22 +310,83 @@ function StaffTab({ user, accessToken }) {
   }
 
   const parseBulkTips = () => {
-    const lines = bulkTipData.trim().split('\n')
+    const raw = bulkTipData.trim()
+    if (!raw) {
+      alert('Please paste tip data first')
+      return
+    }
+
+    const lines = raw
+      .split('\n')
+      .map((line) => line.trim())
+      .filter(Boolean)
+
     const tips = {}
-    
-    lines.forEach(line => {
-      // Match pattern: date and amount
-      const dateMatch = line.match(/(\w+, \w+ \d+, \d{4})/)
-      const amountMatch = line.match(/\$(\d+\.\d{2})/)
-      
-      if (dateMatch && amountMatch) {
-        const dateStr = formatDateKey(new Date(dateMatch[1]))
-        tips[dateStr] = parseFloat(amountMatch[1])
+    const dayNamePattern = '(Sunday|Monday|Tuesday|Wednesday|Thursday|Friday|Saturday)'
+    const fullDateRegex = new RegExp(`^${dayNamePattern},\\s+[A-Za-z]+\\s+\\d{1,2},\\s+\\d{4}$`)
+    const rangeRegex = new RegExp(
+      `${dayNamePattern},\\s+[A-Za-z]+\\s+\\d{1,2},\\s+\\d{4}\\s+\\d{1,2}:\\d{2}\\s*(AM|PM)\\s*-\\s*${dayNamePattern},\\s+[A-Za-z]+\\s+\\d{1,2},\\s+\\d{4}`,
+      'i'
+    )
+    const amountRegex = /\$([\d,]+(?:\.\d{2})?)/
+
+    let pendingDateText = null
+
+    lines.forEach((line) => {
+      const rangeMatch = line.match(rangeRegex)
+      if (rangeMatch) {
+        // First full date in the range is the business day for tips
+        const firstDateMatch = line.match(new RegExp(`${dayNamePattern},\\s+[A-Za-z]+\\s+\\d{1,2},\\s+\\d{4}`))
+        if (firstDateMatch) pendingDateText = firstDateMatch[0]
+      } else if (fullDateRegex.test(line)) {
+        pendingDateText = line
+      }
+
+      const amountMatch = line.match(amountRegex)
+      if (amountMatch && pendingDateText) {
+        const parsedDate = new Date(pendingDateText)
+        if (!Number.isNaN(parsedDate.getTime())) {
+          const dateKey = formatDateKey(parsedDate)
+          const amount = parseFloat(amountMatch[1].replace(/,/g, ''))
+          tips[dateKey] = (tips[dateKey] || 0) + amount
+        }
+        pendingDateText = null
       }
     })
-    
-    setDailyTips(tips)
-    alert(`Parsed ${Object.keys(tips).length} tip entries`)
+
+    // Fallback for single-line formats containing both date and amount
+    const combinedRegex = new RegExp(
+      `${dayNamePattern},\\s+[A-Za-z]+\\s+\\d{1,2},\\s+\\d{4}[\\s\\S]{0,140}?\\$([\\d,]+(?:\\.\\d{2})?)`,
+      'gi'
+    )
+    let combinedMatch
+    while ((combinedMatch = combinedRegex.exec(raw)) !== null) {
+      const dateTextMatch = combinedMatch[0].match(
+        new RegExp(`${dayNamePattern},\\s+[A-Za-z]+\\s+\\d{1,2},\\s+\\d{4}`)
+      )
+      if (!dateTextMatch) continue
+
+      const amountTextMatch = combinedMatch[0].match(amountRegex)
+      if (!amountTextMatch) continue
+
+      const parsedDate = new Date(dateTextMatch[0])
+      if (Number.isNaN(parsedDate.getTime())) continue
+
+      const dateKey = formatDateKey(parsedDate)
+      const amount = parseFloat(amountTextMatch[1].replace(/,/g, ''))
+      if (!Number.isNaN(amount)) {
+        tips[dateKey] = amount
+      }
+    }
+
+    const parsedCount = Object.keys(tips).length
+    if (parsedCount === 0) {
+      alert('Parsed 0 tip entries. Please paste the full GoDaddy rows including the date range and $ amount.')
+      return
+    }
+
+    setDailyTips((prev) => ({ ...prev, ...tips }))
+    alert(`Parsed ${parsedCount} tip ${parsedCount === 1 ? 'entry' : 'entries'}`)
   }
 
   const calculateTips = () => {
