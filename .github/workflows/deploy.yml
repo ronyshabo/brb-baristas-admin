@@ -32,7 +32,7 @@ jobs:
           ssh-keyscan -H $EC2_HOST >> ~/.ssh/known_hosts
           
           # SSH into EC2 and pull latest code, rebuild with secrets, restart
-          ssh -i ~/.ssh/id_rsa $EC2_USER@$EC2_HOST << 'EOF'
+          ssh -i ~/.ssh/id_rsa $EC2_USER@$EC2_HOST << EOF
           cd ~/brb-baristas-admin
           git pull origin main
           docker stop brb-admin && docker rm brb-admin || true
