@@ -53,6 +53,7 @@ function EventsTab({ user, accessToken }) {
   const [editingEvent, setEditingEvent] = useState(null)
   const [generatedLink, setGeneratedLink] = useState(null)
   const [selectedEventIds, setSelectedEventIds] = useState([])
+  const [showHiddenEvents, setShowHiddenEvents] = useState(false)
   const [formData, setFormData] = useState(getInitialFormData())
 
   const calendarId = import.meta.env.VITE_GOOGLE_CALENDAR_ID
@@ -132,9 +133,20 @@ function EventsTab({ user, accessToken }) {
 
   useEffect(() => {
     setSelectedEventIds((previousSelected) =>
-      previousSelected.filter((id) => events.some((event) => event.id === id && event.status !== 'booked'))
+      previousSelected.filter((id) =>
+        events.some((event) => event.id === id && (showHiddenEvents || !event.hidden))
+      )
     )
-  }, [events])
+  }, [events, showHiddenEvents])
+
+  const getVisibleEvents = () =>
+    [...events]
+      .filter((event) => (showHiddenEvents ? true : !event.hidden))
+      .sort((eventA, eventB) => {
+        const dateTimeA = new Date(`${eventA.date}T${eventA.startTime || '00:00'}:00`).getTime()
+        const dateTimeB = new Date(`${eventB.date}T${eventB.startTime || '00:00'}:00`).getTime()
+        return dateTimeB - dateTimeA
+      })
 
   const handleCreateEvent = async (e) => {
     e.preventDefault()
@@ -431,15 +443,16 @@ function EventsTab({ user, accessToken }) {
   }
 
   const handleToggleSelectAllPending = () => {
-    const pendingEventIds = events.filter((event) => event.status !== 'booked').map((event) => event.id)
-    const allPendingSelected = pendingEventIds.length > 0 && pendingEventIds.every((id) => selectedEventIds.includes(id))
+    const visibleEventIds = getVisibleEvents().map((event) => event.id)
+    const allVisibleSelected =
+      visibleEventIds.length > 0 && visibleEventIds.every((id) => selectedEventIds.includes(id))
 
-    if (allPendingSelected) {
+    if (allVisibleSelected) {
       setSelectedEventIds([])
       return
     }
 
-    setSelectedEventIds(pendingEventIds)
+    setSelectedEventIds(visibleEventIds)
   }
 
   const handleApproveSelectedEvents = async () => {
@@ -469,12 +482,46 @@ function EventsTab({ user, accessToken }) {
     alert(`Approved ${approvedCount} event${approvedCount === 1 ? '' : 's'} successfully.`)
   }
 
+  const handleHideSelectedEvents = async () => {
+    if (selectedEventIds.length === 0) {
+      alert('Select at least one event to hide.')
+      return
+    }
+
+    try {
+      await Promise.all(
+        selectedEventIds.map((eventId) =>
+          updateDoc(doc(db, 'events', eventId), {
+            hidden: true,
+            hiddenAt: new Date(),
+            hiddenBy: user.uid,
+          })
+        )
+      )
+
+      setEvents((previousEvents) =>
+        previousEvents.map((event) =>
+          selectedEventIds.includes(event.id)
+            ? { ...event, hidden: true, hiddenAt: new Date(), hiddenBy: user.uid }
+            : event
+        )
+      )
+      setSelectedEventIds([])
+      alert('Selected events have been hidden.')
+    } catch (err) {
+      console.error('Error hiding selected events:', err)
+      alert('Failed to hide selected events')
+    }
+  }
+
   const copyToClipboard = () => {
     navigator.clipboard.writeText(generatedLink.link)
     alert('Link copied to clipboard!')
   }
 
   if (loading) return <div>Loading events...</div>
+
+  const visibleEvents = getVisibleEvents()
 
   return (
     <div className="events-tab">
@@ -666,37 +713,52 @@ function EventsTab({ user, accessToken }) {
               <input
                 type="checkbox"
                 checked={
-                  events.filter((event) => event.status !== 'booked').length > 0 &&
-                  events
-                    .filter((event) => event.status !== 'booked')
-                    .every((event) => selectedEventIds.includes(event.id))
+                  visibleEvents.length > 0 &&
+                  visibleEvents.every((event) => selectedEventIds.includes(event.id))
                 }
                 onChange={handleToggleSelectAllPending}
               />
-              Select all pending events
+              Select all visible events
             </label>
-            <button
-              type="button"
-              className="approve-selected-btn"
-              onClick={handleApproveSelectedEvents}
-              disabled={selectedEventIds.length === 0}
-            >
-              Approve Selected ({selectedEventIds.length})
-            </button>
+            <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
+              <label className="bulk-select-label" style={{ fontWeight: 500 }}>
+                <input
+                  type="checkbox"
+                  checked={showHiddenEvents}
+                  onChange={(e) => setShowHiddenEvents(e.target.checked)}
+                />
+                Show hidden
+              </label>
+              <button
+                type="button"
+                className="approve-selected-btn"
+                onClick={handleApproveSelectedEvents}
+                disabled={selectedEventIds.length === 0}
+              >
+                Approve Selected ({selectedEventIds.length})
+              </button>
+              <button
+                type="button"
+                className="hide-selected-btn"
+                onClick={handleHideSelectedEvents}
+                disabled={selectedEventIds.length === 0}
+              >
+                Hide Selected ({selectedEventIds.length})
+              </button>
+            </div>
           </div>
         )}
 
-        {events.length === 0 ? (
-          <p>No events yet. Create one to get started.</p>
+        {visibleEvents.length === 0 ? (
+          <p>{showHiddenEvents ? 'No events to show.' : 'No visible events. Create one to get started.'}</p>
         ) : (
-          events.map((event) => (
+          visibleEvents.map((event) => (
             <div key={event.id} className="event-card">
               <div className="event-card-head">
                 <label className="event-select-checkbox">
                   <input
                     type="checkbox"
                     checked={selectedEventIds.includes(event.id)}
-                    disabled={event.status === 'booked'}
                     onChange={() => handleToggleSelectEvent(event.id)}
                   />
                   Select

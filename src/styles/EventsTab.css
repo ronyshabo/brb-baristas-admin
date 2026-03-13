@@ -217,6 +217,25 @@
   cursor: not-allowed;
 }
 
+.hide-selected-btn {
+  background-color: #7f8c8d;
+  color: white;
+  border: none;
+  border-radius: 4px;
+  padding: 0.55rem 0.9rem;
+  cursor: pointer;
+  font-weight: 600;
+}
+
+.hide-selected-btn:hover {
+  background-color: #6c7a7b;
+}
+
+.hide-selected-btn:disabled {
+  background-color: #bdc3c7;
+  cursor: not-allowed;
+}
+
 .event-card {
   background: white;
   border: 1px solid #e0e0e0;
