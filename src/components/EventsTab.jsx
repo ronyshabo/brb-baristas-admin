@@ -52,6 +52,7 @@ function EventsTab({ user, accessToken }) {
   const [showForm, setShowForm] = useState(false)
   const [editingEvent, setEditingEvent] = useState(null)
   const [generatedLink, setGeneratedLink] = useState(null)
+  const [selectedEventIds, setSelectedEventIds] = useState([])
   const [formData, setFormData] = useState(getInitialFormData())
 
   const calendarId = import.meta.env.VITE_GOOGLE_CALENDAR_ID
@@ -128,6 +129,12 @@ function EventsTab({ user, accessToken }) {
     }
     fetchEvents()
   }, [])
+
+  useEffect(() => {
+    setSelectedEventIds((previousSelected) =>
+      previousSelected.filter((id) => events.some((event) => event.id === id && event.status !== 'booked'))
+    )
+  }, [events])
 
   const handleCreateEvent = async (e) => {
     e.preventDefault()
@@ -332,14 +339,18 @@ function EventsTab({ user, accessToken }) {
     }
   }
 
-  const handleAdminApproveEvent = async (eventId) => {
+  const handleAdminApproveEvent = async (eventId, options = { silent: false }) => {
+    const { silent = false } = options
+
     try {
       const event = events.find((entry) => entry.id === eventId)
-      if (!event) return
+      if (!event) return false
 
       if (event.status === 'booked') {
-        alert('This event is already booked.')
-        return
+        if (!silent) {
+          alert('This event is already booked.')
+        }
+        return false
       }
 
       let googleCalendarEventId = event.googleCalendarEventId || null
@@ -349,7 +360,9 @@ function EventsTab({ user, accessToken }) {
           googleCalendarEventId = await createGoogleCalendarEventFromEvent(event)
         } catch (calendarError) {
           console.error('Error creating Google Calendar event:', calendarError)
-          alert(calendarError?.message || 'Event approved, but failed to add to Google Calendar.')
+          if (!silent) {
+            alert(calendarError?.message || 'Event approved, but failed to add to Google Calendar.')
+          }
         }
       }
 
@@ -365,12 +378,69 @@ function EventsTab({ user, accessToken }) {
 
       await setDoc(doc(db, 'events', eventId), eventDocData)
 
-      setEvents(events.map((entry) => (entry.id === eventId ? { ...updatedData, id: eventId } : entry)))
-      alert('Event approved directly by admin!')
+      setEvents((previousEvents) =>
+        previousEvents.map((entry) => (entry.id === eventId ? { ...updatedData, id: eventId } : entry))
+      )
+      setSelectedEventIds((previousSelected) => previousSelected.filter((id) => id !== eventId))
+
+      if (!silent) {
+        alert('Event approved directly by admin!')
+      }
+      return true
     } catch (err) {
       console.error('Error approving event directly:', err)
-      alert('Failed to approve event')
+      if (!silent) {
+        alert('Failed to approve event')
+      }
+      return false
     }
+  }
+
+  const handleToggleSelectEvent = (eventId) => {
+    setSelectedEventIds((previousSelected) =>
+      previousSelected.includes(eventId)
+        ? previousSelected.filter((id) => id !== eventId)
+        : [...previousSelected, eventId]
+    )
+  }
+
+  const handleToggleSelectAllPending = () => {
+    const pendingEventIds = events.filter((event) => event.status !== 'booked').map((event) => event.id)
+    const allPendingSelected = pendingEventIds.length > 0 && pendingEventIds.every((id) => selectedEventIds.includes(id))
+
+    if (allPendingSelected) {
+      setSelectedEventIds([])
+      return
+    }
+
+    setSelectedEventIds(pendingEventIds)
+  }
+
+  const handleApproveSelectedEvents = async () => {
+    if (selectedEventIds.length === 0) {
+      alert('Select at least one pending event to approve.')
+      return
+    }
+
+    let approvedCount = 0
+
+    for (const eventId of selectedEventIds) {
+      const event = events.find((entry) => entry.id === eventId)
+      if (!event || event.status === 'booked') {
+        continue
+      }
+
+      try {
+        const approved = await handleAdminApproveEvent(eventId, { silent: true })
+        if (approved) {
+          approvedCount += 1
+        }
+      } catch (error) {
+        console.error(`Failed to approve event ${eventId}:`, error)
+      }
+    }
+
+    alert(`Approved ${approvedCount} event${approvedCount === 1 ? '' : 's'} successfully.`)
   }
 
   const copyToClipboard = () => {
@@ -564,12 +634,49 @@ function EventsTab({ user, accessToken }) {
       )}
 
       <div className="events-list">
+        {events.length > 0 && (
+          <div className="bulk-actions-bar">
+            <label className="bulk-select-label">
+              <input
+                type="checkbox"
+                checked={
+                  events.filter((event) => event.status !== 'booked').length > 0 &&
+                  events
+                    .filter((event) => event.status !== 'booked')
+                    .every((event) => selectedEventIds.includes(event.id))
+                }
+                onChange={handleToggleSelectAllPending}
+              />
+              Select all pending events
+            </label>
+            <button
+              type="button"
+              className="approve-selected-btn"
+              onClick={handleApproveSelectedEvents}
+              disabled={selectedEventIds.length === 0}
+            >
+              Approve Selected ({selectedEventIds.length})
+            </button>
+          </div>
+        )}
+
         {events.length === 0 ? (
           <p>No events yet. Create one to get started.</p>
         ) : (
           events.map((event) => (
             <div key={event.id} className="event-card">
-              <h3>{event.title} {event.status === 'booked' && <span style={{ color: '#27ae60', fontSize: '0.9rem' }}>(Booked)</span>}</h3>
+              <div className="event-card-head">
+                <label className="event-select-checkbox">
+                  <input
+                    type="checkbox"
+                    checked={selectedEventIds.includes(event.id)}
+                    disabled={event.status === 'booked'}
+                    onChange={() => handleToggleSelectEvent(event.id)}
+                  />
+                  Select
+                </label>
+                <h3>{event.title} {event.status === 'booked' && <span style={{ color: '#27ae60', fontSize: '0.9rem' }}>(Booked)</span>}</h3>
+              </div>
               <p>{event.date} {formatTime12Hour(event.startTime)} - {formatTime12Hour(event.endTime)}</p>
               <p>{event.description}</p>
               <div className="event-actions">
