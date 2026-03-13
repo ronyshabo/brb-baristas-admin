@@ -134,19 +134,50 @@ function EventsTab({ user, accessToken }) {
   useEffect(() => {
     setSelectedEventIds((previousSelected) =>
       previousSelected.filter((id) =>
-        events.some((event) => event.id === id && (showHiddenEvents || !event.hidden))
+        getVisibleEventEntries().some((entry) => entry.entryId === id)
       )
     )
   }, [events, showHiddenEvents])
 
-  const getVisibleEvents = () =>
-    [...events]
-      .filter((event) => (showHiddenEvents ? true : !event.hidden))
-      .sort((eventA, eventB) => {
-        const dateTimeA = new Date(`${eventA.date}T${eventA.startTime || '00:00'}:00`).getTime()
-        const dateTimeB = new Date(`${eventB.date}T${eventB.startTime || '00:00'}:00`).getTime()
-        return dateTimeB - dateTimeA
+  const getEventDateTime = (event) => new Date(`${event.date}T${event.startTime || '00:00'}:00`).getTime()
+
+  const getVisibleEventEntries = () => {
+    const filteredEvents = events.filter((event) => (showHiddenEvents ? true : !event.hidden))
+    const groupedEvents = new Map()
+
+    filteredEvents.forEach((event) => {
+      const groupKey = event.isRecurring && event.recurrenceGroupId ? `recurring-${event.recurrenceGroupId}` : `single-${event.id}`
+
+      if (!groupedEvents.has(groupKey)) {
+        groupedEvents.set(groupKey, [])
+      }
+
+      groupedEvents.get(groupKey).push(event)
+    })
+
+    return [...groupedEvents.entries()]
+      .map(([entryId, grouped]) => {
+        const sortedGrouped = [...grouped].sort((a, b) => getEventDateTime(a) - getEventDateTime(b))
+        const representative = sortedGrouped[0]
+        const firstOccurrence = sortedGrouped[0]
+        const lastOccurrence = sortedGrouped[sortedGrouped.length - 1]
+        const allBooked = sortedGrouped.every((event) => event.status === 'booked')
+        const someBooked = sortedGrouped.some((event) => event.status === 'booked')
+
+        return {
+          entryId,
+          representative,
+          events: sortedGrouped,
+          eventIds: sortedGrouped.map((event) => event.id),
+          isSeries: sortedGrouped.length > 1,
+          firstOccurrence,
+          lastOccurrence,
+          status: allBooked ? 'booked' : someBooked ? 'partial' : 'pending',
+          sortTs: getEventDateTime(lastOccurrence),
+        }
       })
+      .sort((a, b) => b.sortTs - a.sortTs)
+  }
 
   const handleCreateEvent = async (e) => {
     e.preventDefault()
@@ -302,8 +333,9 @@ function EventsTab({ user, accessToken }) {
     }
   }
 
-  const handleDeleteEvent = async (eventId) => {
-    if (!confirm('Are you sure you want to delete this event?')) return
+  const handleDeleteEvent = async (eventId, options = { confirmDelete: true }) => {
+    const { confirmDelete = true } = options
+    if (confirmDelete && !confirm('Are you sure you want to delete this event?')) return
     
     try {
       const event = events.find(e => e.id === eventId)
@@ -331,10 +363,28 @@ function EventsTab({ user, accessToken }) {
       
       // Delete from Firestore
       await deleteDoc(doc(db, 'events', eventId))
-      setEvents(events.filter(e => e.id !== eventId))
+      setEvents((previousEvents) => previousEvents.filter((entry) => entry.id !== eventId))
     } catch (err) {
       console.error('Error deleting event:', err)
       alert('Failed to delete event')
+    }
+  }
+
+  const handleDeleteEventEntry = async (entry) => {
+    const confirmMessage = entry.isSeries
+      ? `Are you sure you want to delete this recurring series (${entry.events.length} events)?`
+      : 'Are you sure you want to delete this event?'
+
+    if (!confirm(confirmMessage)) return
+
+    try {
+      for (const eventId of entry.eventIds) {
+        await handleDeleteEvent(eventId, { confirmDelete: false })
+      }
+      setSelectedEventIds((previousSelected) => previousSelected.filter((id) => id !== entry.entryId))
+    } catch (err) {
+      console.error('Error deleting event entry:', err)
+      alert('Failed to delete event(s)')
     }
   }
 
@@ -443,7 +493,7 @@ function EventsTab({ user, accessToken }) {
   }
 
   const handleToggleSelectAllPending = () => {
-    const visibleEventIds = getVisibleEvents().map((event) => event.id)
+    const visibleEventIds = getVisibleEventEntries().map((entry) => entry.entryId)
     const allVisibleSelected =
       visibleEventIds.length > 0 && visibleEventIds.every((id) => selectedEventIds.includes(id))
 
@@ -463,19 +513,23 @@ function EventsTab({ user, accessToken }) {
 
     let approvedCount = 0
 
-    for (const eventId of selectedEventIds) {
-      const event = events.find((entry) => entry.id === eventId)
-      if (!event || event.status === 'booked') {
+    const selectedEntries = getVisibleEventEntries().filter((entry) => selectedEventIds.includes(entry.entryId))
+
+    for (const entry of selectedEntries) {
+      const pendingEventIds = entry.events.filter((event) => event.status !== 'booked').map((event) => event.id)
+      if (pendingEventIds.length === 0) {
         continue
       }
 
-      try {
-        const approved = await handleAdminApproveEvent(eventId, { silent: true })
-        if (approved) {
-          approvedCount += 1
+      for (const eventId of pendingEventIds) {
+        try {
+          const approved = await handleAdminApproveEvent(eventId, { silent: true })
+          if (approved) {
+            approvedCount += 1
+          }
+        } catch (error) {
+          console.error(`Failed to approve event ${eventId}:`, error)
         }
-      } catch (error) {
-        console.error(`Failed to approve event ${eventId}:`, error)
       }
     }
 
@@ -489,8 +543,11 @@ function EventsTab({ user, accessToken }) {
     }
 
     try {
+      const selectedEntries = getVisibleEventEntries().filter((entry) => selectedEventIds.includes(entry.entryId))
+      const eventIdsToHide = selectedEntries.flatMap((entry) => entry.eventIds)
+
       await Promise.all(
-        selectedEventIds.map((eventId) =>
+        eventIdsToHide.map((eventId) =>
           updateDoc(doc(db, 'events', eventId), {
             hidden: true,
             hiddenAt: new Date(),
@@ -501,7 +558,7 @@ function EventsTab({ user, accessToken }) {
 
       setEvents((previousEvents) =>
         previousEvents.map((event) =>
-          selectedEventIds.includes(event.id)
+          eventIdsToHide.includes(event.id)
             ? { ...event, hidden: true, hiddenAt: new Date(), hiddenBy: user.uid }
             : event
         )
@@ -521,7 +578,7 @@ function EventsTab({ user, accessToken }) {
 
   if (loading) return <div>Loading events...</div>
 
-  const visibleEvents = getVisibleEvents()
+  const visibleEventEntries = getVisibleEventEntries()
 
   return (
     <div className="events-tab">
@@ -713,8 +770,8 @@ function EventsTab({ user, accessToken }) {
               <input
                 type="checkbox"
                 checked={
-                  visibleEvents.length > 0 &&
-                  visibleEvents.every((event) => selectedEventIds.includes(event.id))
+                  visibleEventEntries.length > 0 &&
+                  visibleEventEntries.every((entry) => selectedEventIds.includes(entry.entryId))
                 }
                 onChange={handleToggleSelectAllPending}
               />
@@ -749,31 +806,50 @@ function EventsTab({ user, accessToken }) {
           </div>
         )}
 
-        {visibleEvents.length === 0 ? (
+        {visibleEventEntries.length === 0 ? (
           <p>{showHiddenEvents ? 'No events to show.' : 'No visible events. Create one to get started.'}</p>
         ) : (
-          visibleEvents.map((event) => (
-            <div key={event.id} className="event-card">
+          visibleEventEntries.map((entry) => (
+            <div key={entry.entryId} className="event-card">
               <div className="event-card-head">
                 <label className="event-select-checkbox">
                   <input
                     type="checkbox"
-                    checked={selectedEventIds.includes(event.id)}
-                    onChange={() => handleToggleSelectEvent(event.id)}
+                    checked={selectedEventIds.includes(entry.entryId)}
+                    onChange={() => handleToggleSelectEvent(entry.entryId)}
                   />
                   Select
                 </label>
-                <h3>{event.title} {event.status === 'booked' && <span style={{ color: '#27ae60', fontSize: '0.9rem' }}>(Booked)</span>}</h3>
+                <h3>
+                  {entry.representative.title}{' '}
+                  {entry.status === 'booked' && <span style={{ color: '#27ae60', fontSize: '0.9rem' }}>(Booked)</span>}
+                  {entry.status === 'partial' && <span style={{ color: '#f39c12', fontSize: '0.9rem' }}>(Partially Booked)</span>}
+                  {entry.isSeries && <span style={{ color: '#667eea', fontSize: '0.9rem' }}>({entry.events.length} in series)</span>}
+                </h3>
               </div>
-              <p>{event.date} {formatTime12Hour(event.startTime)} - {formatTime12Hour(event.endTime)}</p>
-              <p>{event.description}</p>
+              <p>
+                {entry.isSeries
+                  ? `${entry.firstOccurrence.date} → ${entry.lastOccurrence.date}`
+                  : `${entry.representative.date} ${formatTime12Hour(entry.representative.startTime)} - ${formatTime12Hour(entry.representative.endTime)}`}
+              </p>
+              <p>{entry.representative.description}</p>
               <div className="event-actions">
-                <button onClick={() => handleEditEvent(event)}>Edit</button>
-                <button onClick={() => handleAdminApproveEvent(event.id)} disabled={event.status === 'booked'}>
-                  {event.status === 'booked' ? 'Approved' : 'Admin Approve'}
+                <button onClick={() => handleEditEvent(entry.representative)}>Edit</button>
+                <button
+                  onClick={async () => {
+                    for (const eventId of entry.eventIds) {
+                      await handleAdminApproveEvent(eventId, { silent: true })
+                    }
+                    alert(entry.isSeries ? 'Recurring series approved.' : 'Event approved directly by admin!')
+                  }}
+                  disabled={entry.status === 'booked'}
+                >
+                  {entry.status === 'booked' ? 'Approved' : entry.isSeries ? 'Approve Series' : 'Admin Approve'}
                 </button>
-                <button onClick={() => handleGenerateLink(event.id)}>Generate Link</button>
-                <button onClick={() => handleDeleteEvent(event.id)}>Delete</button>
+                <button onClick={() => handleGenerateLink(entry.representative.id)}>Generate Link</button>
+                <button onClick={() => handleDeleteEventEntry(entry)}>
+                  {entry.isSeries ? 'Delete Series' : 'Delete'}
+                </button>
               </div>
             </div>
           ))
