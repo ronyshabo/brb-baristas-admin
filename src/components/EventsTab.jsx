@@ -176,10 +176,31 @@ function EventsTab({ user, accessToken }) {
 
       const recurrenceGroupId = formData.isRecurring ? uuidv4() : null
       const createdEvents = []
+      let calendarSyncedCount = 0
+      let calendarFailedCount = 0
 
       await Promise.all(
         eventDates.map(async (dateValue) => {
           const customId = `${dateValue}_${startTime.replace(':', '')}`
+          let googleCalendarEventId = null
+
+          if (accessToken) {
+            try {
+              googleCalendarEventId = await createGoogleCalendarEventFromEvent({
+                title: formData.title,
+                date: dateValue,
+                startTime,
+                endTime,
+                description: formData.description,
+                bandEmail: formData.bandEmail,
+              })
+              calendarSyncedCount += 1
+            } catch (calendarError) {
+              calendarFailedCount += 1
+              console.error('Error creating Google Calendar event on create:', calendarError)
+            }
+          }
+
           const eventData = {
             title: formData.title,
             date: dateValue,
@@ -189,7 +210,7 @@ function EventsTab({ user, accessToken }) {
             bandEmail: formData.bandEmail,
             adminId: user.uid,
             createdAt: new Date(),
-            googleCalendarEventId: null,
+            googleCalendarEventId,
             status: 'pending',
             isRecurring: formData.isRecurring,
             recurrenceMode: formData.isRecurring ? formData.recurrenceMode : null,
@@ -204,7 +225,12 @@ function EventsTab({ user, accessToken }) {
       setEvents([...events, ...createdEvents])
       setFormData(getInitialFormData())
       setShowForm(false)
-      // TODO: Sync to Google Calendar
+
+      if (!accessToken) {
+        alert('Event created. Log in with Google to auto-add future events to Calendar.')
+      } else if (calendarFailedCount > 0) {
+        alert(`Created ${createdEvents.length} event(s). Synced ${calendarSyncedCount} to Google Calendar, ${calendarFailedCount} failed.`)
+      }
     } catch (err) {
       console.error('Error creating event:', err)
     }
