@@ -131,6 +131,48 @@
   background-color: #229954;
 }
 
+.recurrence-box {
+  border: 1px solid #dfe6e9;
+  border-radius: 6px;
+  background: #ffffff;
+  padding: 0.75rem;
+}
+
+.recurrence-check {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  color: #2c3e50;
+  font-weight: 600;
+}
+
+.recurrence-controls {
+  margin-top: 0.75rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.recurrence-row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.recurrence-row label {
+  min-width: 130px;
+  color: #34495e;
+}
+
+.recurrence-row select,
+.recurrence-row input {
+  flex: 1;
+  padding: 0.5rem;
+  border: 1px solid #bdc3c7;
+  border-radius: 4px;
+  font-size: 0.95rem;
+}
+
 .events-list {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));

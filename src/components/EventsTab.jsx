@@ -4,6 +4,23 @@ import { db } from '../firebase/config'
 import { v4 as uuidv4 } from 'uuid'
 import '../styles/EventsTab.css'
 
+const getInitialFormData = () => ({
+  title: '',
+  date: '',
+  startHour: '',
+  startMinute: '',
+  startPeriod: 'AM',
+  endHour: '',
+  endMinute: '',
+  endPeriod: 'AM',
+  description: '',
+  bandEmail: '',
+  isRecurring: false,
+  recurrenceMode: 'weeks',
+  recurrenceWeeks: '1',
+  recurrenceEndDate: '',
+})
+
 // Helper function to convert 24-hour time to 12-hour format
 const convertTo12Hour = (time24) => {
   if (!time24) return { hour: '', minute: '', period: 'AM' }
@@ -35,23 +52,63 @@ function EventsTab({ user, accessToken }) {
   const [showForm, setShowForm] = useState(false)
   const [editingEvent, setEditingEvent] = useState(null)
   const [generatedLink, setGeneratedLink] = useState(null)
-  const [formData, setFormData] = useState({
-    title: '',
-    date: '',
-    startHour: '',
-    startMinute: '',
-    startPeriod: 'AM',
-    endHour: '',
-    endMinute: '',
-    endPeriod: 'AM',
-    description: '',
-    bandEmail: '',
-  })
+  const [formData, setFormData] = useState(getInitialFormData())
 
   const calendarId = import.meta.env.VITE_GOOGLE_CALENDAR_ID
+  const timeZone = import.meta.env.VITE_GOOGLE_CALENDAR_TIME_ZONE || 'America/Chicago'
   const signupBaseUrl =
     import.meta.env.VITE_SIGNUP_BASE_URL ||
     (typeof window !== 'undefined' ? window.location.origin : '')
+
+  const createGoogleCalendarEventFromEvent = async (event) => {
+    if (!calendarId) {
+      throw new Error('Missing Google Calendar configuration')
+    }
+
+    if (!accessToken) {
+      throw new Error('Google Calendar access not authorized')
+    }
+
+    const startDateTime = `${event.date}T${event.startTime}:00`
+    const endDateTime = `${event.date}T${event.endTime}:00`
+
+    const response = await fetch(
+      `https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(calendarId)}/events`,
+      {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          summary: event.title,
+          description: [
+            event.description ? `Description: ${event.description}` : null,
+            event.bandEmail ? `Email: ${event.bandEmail}` : null,
+            'Booked directly by admin',
+          ]
+            .filter(Boolean)
+            .join('\n'),
+          start: {
+            dateTime: startDateTime,
+            timeZone,
+          },
+          end: {
+            dateTime: endDateTime,
+            timeZone,
+          },
+        }),
+      }
+    )
+
+    const data = await response.json()
+    if (!response.ok) {
+      const apiMessage = data?.error?.message || 'Failed to create Google Calendar event'
+      throw new Error(apiMessage)
+    }
+
+    return data.id
+  }
 
   // TODO: Fetch events from Firestore on component mount
   useEffect(() => {
@@ -78,25 +135,67 @@ function EventsTab({ user, accessToken }) {
       // Convert 12-hour time to 24-hour format
       const startTime = convertTo24Hour(formData.startHour, formData.startMinute, formData.startPeriod)
       const endTime = convertTo24Hour(formData.endHour, formData.endMinute, formData.endPeriod)
-      
-      // Create custom document ID: date_startTime
-      const customId = `${formData.date}_${startTime.replace(':', '')}`
-      const eventData = {
-        title: formData.title,
-        date: formData.date,
-        startTime,
-        endTime,
-        description: formData.description,
-        bandEmail: formData.bandEmail,
-        adminId: user.uid,
-        createdAt: new Date(),
-        googleCalendarEventId: null,
-        status: 'pending',
+
+      const baseDate = new Date(`${formData.date}T00:00:00`)
+      const eventDates = []
+
+      if (!formData.isRecurring) {
+        eventDates.push(formData.date)
+      } else if (formData.recurrenceMode === 'weeks') {
+        const weeks = Math.max(1, parseInt(formData.recurrenceWeeks || '1', 10))
+        for (let i = 0; i < weeks; i++) {
+          const nextDate = new Date(baseDate)
+          nextDate.setDate(baseDate.getDate() + i * 7)
+          eventDates.push(nextDate.toISOString().split('T')[0])
+        }
+      } else {
+        if (!formData.recurrenceEndDate) {
+          alert('Please select an end date for day-based recurring events')
+          return
+        }
+
+        const endDate = new Date(`${formData.recurrenceEndDate}T00:00:00`)
+        if (endDate < baseDate) {
+          alert('Recurring end date must be after the event start date')
+          return
+        }
+
+        let cursor = new Date(baseDate)
+        while (cursor <= endDate) {
+          eventDates.push(cursor.toISOString().split('T')[0])
+          cursor.setDate(cursor.getDate() + 7)
+        }
       }
-      
-      await setDoc(doc(db, 'events', customId), eventData)
-      setEvents([...events, { id: customId, ...eventData }])
-      setFormData({ title: '', date: '', startHour: '', startMinute: '', startPeriod: 'AM', endHour: '', endMinute: '', endPeriod: 'AM', description: '', bandEmail: '' })
+
+      const recurrenceGroupId = formData.isRecurring ? uuidv4() : null
+      const createdEvents = []
+
+      await Promise.all(
+        eventDates.map(async (dateValue) => {
+          const customId = `${dateValue}_${startTime.replace(':', '')}`
+          const eventData = {
+            title: formData.title,
+            date: dateValue,
+            startTime,
+            endTime,
+            description: formData.description,
+            bandEmail: formData.bandEmail,
+            adminId: user.uid,
+            createdAt: new Date(),
+            googleCalendarEventId: null,
+            status: 'pending',
+            isRecurring: formData.isRecurring,
+            recurrenceMode: formData.isRecurring ? formData.recurrenceMode : null,
+            recurrenceGroupId,
+          }
+
+          await setDoc(doc(db, 'events', customId), eventData)
+          createdEvents.push({ id: customId, ...eventData })
+        })
+      )
+
+      setEvents([...events, ...createdEvents])
+      setFormData(getInitialFormData())
       setShowForm(false)
       // TODO: Sync to Google Calendar
     } catch (err) {
@@ -120,6 +219,10 @@ function EventsTab({ user, accessToken }) {
       endPeriod: endTime12.period,
       description: event.description,
       bandEmail: event.bandEmail,
+      isRecurring: false,
+      recurrenceMode: 'weeks',
+      recurrenceWeeks: '1',
+      recurrenceEndDate: '',
     })
     setShowForm(true)
   }
@@ -146,7 +249,7 @@ function EventsTab({ user, accessToken }) {
       
       await setDoc(doc(db, 'events', editingEvent.id), eventData)
       setEvents(events.map(e => e.id === editingEvent.id ? { id: editingEvent.id, ...eventData } : e))
-      setFormData({ title: '', date: '', startHour: '', startMinute: '', startPeriod: 'AM', endHour: '', endMinute: '', endPeriod: 'AM', description: '', bandEmail: '' })
+      setFormData(getInitialFormData())
       setShowForm(false)
       setEditingEvent(null)
     } catch (err) {
@@ -192,7 +295,7 @@ function EventsTab({ user, accessToken }) {
 
   const handleCancelEdit = () => {
     setEditingEvent(null)
-    setFormData({ title: '', date: '', startHour: '', startMinute: '', startPeriod: 'AM', endHour: '', endMinute: '', endPeriod: 'AM', description: '', bandEmail: '' })
+    setFormData(getInitialFormData())
     setShowForm(false)
   }
 
@@ -226,6 +329,47 @@ function EventsTab({ user, accessToken }) {
     } catch (err) {
       console.error('Error generating link:', err)
       alert('Failed to generate link')
+    }
+  }
+
+  const handleAdminApproveEvent = async (eventId) => {
+    try {
+      const event = events.find((entry) => entry.id === eventId)
+      if (!event) return
+
+      if (event.status === 'booked') {
+        alert('This event is already booked.')
+        return
+      }
+
+      let googleCalendarEventId = event.googleCalendarEventId || null
+
+      if (!googleCalendarEventId && accessToken) {
+        try {
+          googleCalendarEventId = await createGoogleCalendarEventFromEvent(event)
+        } catch (calendarError) {
+          console.error('Error creating Google Calendar event:', calendarError)
+          alert(calendarError?.message || 'Event approved, but failed to add to Google Calendar.')
+        }
+      }
+
+      const updatedData = {
+        ...event,
+        status: 'booked',
+        bookedAt: new Date(),
+        bookedDirectlyByAdmin: true,
+        googleCalendarEventId,
+      }
+
+      const { id: _, ...eventDocData } = updatedData
+
+      await setDoc(doc(db, 'events', eventId), eventDocData)
+
+      setEvents(events.map((entry) => (entry.id === eventId ? { ...updatedData, id: eventId } : entry)))
+      alert('Event approved directly by admin!')
+    } catch (err) {
+      console.error('Error approving event directly:', err)
+      alert('Failed to approve event')
     }
   }
 
@@ -352,6 +496,66 @@ function EventsTab({ user, accessToken }) {
             onChange={(e) => setFormData({ ...formData, bandEmail: e.target.value })}
             required
           />
+
+          {!editingEvent && (
+            <div className="recurrence-box">
+              <label className="recurrence-check">
+                <input
+                  type="checkbox"
+                  checked={formData.isRecurring}
+                  onChange={(e) =>
+                    setFormData({
+                      ...formData,
+                      isRecurring: e.target.checked,
+                      recurrenceWeeks: formData.recurrenceWeeks || '1',
+                    })
+                  }
+                />
+                Recurring Event
+              </label>
+
+              {formData.isRecurring && (
+                <div className="recurrence-controls">
+                  <div className="recurrence-row">
+                    <label>Repeat based on:</label>
+                    <select
+                      value={formData.recurrenceMode}
+                      onChange={(e) => setFormData({ ...formData, recurrenceMode: e.target.value })}
+                    >
+                      <option value="weeks">Number of Weeks</option>
+                      <option value="day">Day (same weekday) until date</option>
+                    </select>
+                  </div>
+
+                  {formData.recurrenceMode === 'weeks' ? (
+                    <div className="recurrence-row">
+                      <label>Number of weeks:</label>
+                      <input
+                        type="number"
+                        min="1"
+                        max="52"
+                        value={formData.recurrenceWeeks}
+                        onChange={(e) => setFormData({ ...formData, recurrenceWeeks: e.target.value })}
+                        required={formData.isRecurring && formData.recurrenceMode === 'weeks'}
+                      />
+                    </div>
+                  ) : (
+                    <div className="recurrence-row">
+                      <label>End date:</label>
+                      <input
+                        type="date"
+                        value={formData.recurrenceEndDate}
+                        onChange={(e) => setFormData({ ...formData, recurrenceEndDate: e.target.value })}
+                        min={formData.date || undefined}
+                        required={formData.isRecurring && formData.recurrenceMode === 'day'}
+                      />
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          )}
+
           <div style={{ display: 'flex', gap: '0.5rem' }}>
             <button type="submit">{editingEvent ? 'Update Event' : 'Create Event'}</button>
             {editingEvent && <button type="button" onClick={handleCancelEdit}>Cancel</button>}
@@ -370,6 +574,9 @@ function EventsTab({ user, accessToken }) {
               <p>{event.description}</p>
               <div className="event-actions">
                 <button onClick={() => handleEditEvent(event)}>Edit</button>
+                <button onClick={() => handleAdminApproveEvent(event.id)} disabled={event.status === 'booked'}>
+                  {event.status === 'booked' ? 'Approved' : 'Admin Approve'}
+                </button>
                 <button onClick={() => handleGenerateLink(event.id)}>Generate Link</button>
                 <button onClick={() => handleDeleteEvent(event.id)}>Delete</button>
               </div>
