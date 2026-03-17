@@ -27,6 +27,15 @@ jobs:
           GOOGLE_CALENDAR_API_KEY: ${{ secrets.GOOGLE_CALENDAR_API_KEY }}
         run: |
           set -euo pipefail
+          FIREBASE_API_KEY_B64=$(printf %s "$FIREBASE_API_KEY" | base64 -w 0)
+          FIREBASE_AUTH_DOMAIN_B64=$(printf %s "$FIREBASE_AUTH_DOMAIN" | base64 -w 0)
+          FIREBASE_PROJECT_ID_B64=$(printf %s "$FIREBASE_PROJECT_ID" | base64 -w 0)
+          FIREBASE_STORAGE_BUCKET_B64=$(printf %s "$FIREBASE_STORAGE_BUCKET" | base64 -w 0)
+          FIREBASE_MESSAGING_SENDER_ID_B64=$(printf %s "$FIREBASE_MESSAGING_SENDER_ID" | base64 -w 0)
+          FIREBASE_APP_ID_B64=$(printf %s "$FIREBASE_APP_ID" | base64 -w 0)
+          GOOGLE_CALENDAR_ID_B64=$(printf %s "$GOOGLE_CALENDAR_ID" | base64 -w 0)
+          GOOGLE_CALENDAR_API_KEY_B64=$(printf %s "$GOOGLE_CALENDAR_API_KEY" | base64 -w 0)
+
           mkdir -p ~/.ssh
           echo "$EC2_SSH_KEY" > ~/.ssh/id_rsa
           chmod 600 ~/.ssh/id_rsa
@@ -41,32 +50,15 @@ jobs:
           git checkout main
           git reset --hard origin/main
 
-          cat > /tmp/VITE_FIREBASE_API_KEY << 'SEC'
-          $FIREBASE_API_KEY
-          SEC
-          cat > /tmp/VITE_FIREBASE_AUTH_DOMAIN << 'SEC'
-          $FIREBASE_AUTH_DOMAIN
-          SEC
-          cat > /tmp/VITE_FIREBASE_PROJECT_ID << 'SEC'
-          $FIREBASE_PROJECT_ID
-          SEC
-          cat > /tmp/VITE_FIREBASE_STORAGE_BUCKET << 'SEC'
-          $FIREBASE_STORAGE_BUCKET
-          SEC
-          cat > /tmp/VITE_FIREBASE_MESSAGING_SENDER_ID << 'SEC'
-          $FIREBASE_MESSAGING_SENDER_ID
-          SEC
-          cat > /tmp/VITE_FIREBASE_APP_ID << 'SEC'
-          $FIREBASE_APP_ID
-          SEC
-          cat > /tmp/VITE_GOOGLE_CALENDAR_ID << 'SEC'
-          $GOOGLE_CALENDAR_ID
-          SEC
-          cat > /tmp/VITE_GOOGLE_CALENDAR_API_KEY << 'SEC'
-          $GOOGLE_CALENDAR_API_KEY
-          SEC
+          printf '%s' "$FIREBASE_API_KEY_B64" | base64 -d > /tmp/VITE_FIREBASE_API_KEY
+          printf '%s' "$FIREBASE_AUTH_DOMAIN_B64" | base64 -d > /tmp/VITE_FIREBASE_AUTH_DOMAIN
+          printf '%s' "$FIREBASE_PROJECT_ID_B64" | base64 -d > /tmp/VITE_FIREBASE_PROJECT_ID
+          printf '%s' "$FIREBASE_STORAGE_BUCKET_B64" | base64 -d > /tmp/VITE_FIREBASE_STORAGE_BUCKET
+          printf '%s' "$FIREBASE_MESSAGING_SENDER_ID_B64" | base64 -d > /tmp/VITE_FIREBASE_MESSAGING_SENDER_ID
+          printf '%s' "$FIREBASE_APP_ID_B64" | base64 -d > /tmp/VITE_FIREBASE_APP_ID
+          printf '%s' "$GOOGLE_CALENDAR_ID_B64" | base64 -d > /tmp/VITE_GOOGLE_CALENDAR_ID
+          printf '%s' "$GOOGLE_CALENDAR_API_KEY_B64" | base64 -d > /tmp/VITE_GOOGLE_CALENDAR_API_KEY
 
-          docker stop brb-admin && docker rm brb-admin || true
           export DOCKER_BUILDKIT=1
           docker build --no-cache \
             --secret id=VITE_FIREBASE_API_KEY,src=/tmp/VITE_FIREBASE_API_KEY \
@@ -77,7 +69,7 @@ jobs:
             --secret id=VITE_FIREBASE_APP_ID,src=/tmp/VITE_FIREBASE_APP_ID \
             --secret id=VITE_GOOGLE_CALENDAR_ID,src=/tmp/VITE_GOOGLE_CALENDAR_ID \
             --secret id=VITE_GOOGLE_CALENDAR_API_KEY,src=/tmp/VITE_GOOGLE_CALENDAR_API_KEY \
-            -t brb-admin .
+            -t brb-admin:candidate .
 
           rm -f /tmp/VITE_FIREBASE_API_KEY \
             /tmp/VITE_FIREBASE_AUTH_DOMAIN \
@@ -88,7 +80,9 @@ jobs:
             /tmp/VITE_GOOGLE_CALENDAR_ID \
             /tmp/VITE_GOOGLE_CALENDAR_API_KEY
 
-          docker run -d -p 3001:80 --name brb-admin brb-admin
+          docker stop brb-admin && docker rm brb-admin || true
+          docker tag brb-admin:candidate brb-admin:latest
+          docker run -d -p 3001:80 --name brb-admin brb-admin:latest
           docker ps --filter name=brb-admin --format 'table {{.Names}}\t{{.Status}}\t{{.Ports}}'
           docker inspect -f '{{.State.Running}}' brb-admin | grep true
           echo "Deployment complete and container is running."
