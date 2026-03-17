@@ -14,7 +14,7 @@ const formatTime12Hour = (time24) => {
 }
 
 function BookingsTab({ accessToken }) {
-  const [bookings, setBookings] = useState([]) /
+  const [bookings, setBookings] = useState([])
   const [loading, setLoading] = useState(true)
   const [filter, setFilter] = useState('pending')
   const [error, setError] = useState(null)

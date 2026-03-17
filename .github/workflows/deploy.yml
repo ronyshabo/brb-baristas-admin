@@ -42,15 +42,16 @@ jobs:
           git reset --hard origin/main
 
           docker stop brb-admin && docker rm brb-admin || true
+          export DOCKER_BUILDKIT=1
           docker build --no-cache \
-            --build-arg VITE_FIREBASE_API_KEY="$FIREBASE_API_KEY" \
-            --build-arg VITE_FIREBASE_AUTH_DOMAIN="$FIREBASE_AUTH_DOMAIN" \
-            --build-arg VITE_FIREBASE_PROJECT_ID="$FIREBASE_PROJECT_ID" \
-            --build-arg VITE_FIREBASE_STORAGE_BUCKET="$FIREBASE_STORAGE_BUCKET" \
-            --build-arg VITE_FIREBASE_MESSAGING_SENDER_ID="$FIREBASE_MESSAGING_SENDER_ID" \
-            --build-arg VITE_FIREBASE_APP_ID="$FIREBASE_APP_ID" \
-            --build-arg VITE_GOOGLE_CALENDAR_ID="$GOOGLE_CALENDAR_ID" \
-            --build-arg VITE_GOOGLE_CALENDAR_API_KEY="$GOOGLE_CALENDAR_API_KEY" \
+            --secret id=VITE_FIREBASE_API_KEY,env=FIREBASE_API_KEY \
+            --secret id=VITE_FIREBASE_AUTH_DOMAIN,env=FIREBASE_AUTH_DOMAIN \
+            --secret id=VITE_FIREBASE_PROJECT_ID,env=FIREBASE_PROJECT_ID \
+            --secret id=VITE_FIREBASE_STORAGE_BUCKET,env=FIREBASE_STORAGE_BUCKET \
+            --secret id=VITE_FIREBASE_MESSAGING_SENDER_ID,env=FIREBASE_MESSAGING_SENDER_ID \
+            --secret id=VITE_FIREBASE_APP_ID,env=FIREBASE_APP_ID \
+            --secret id=VITE_GOOGLE_CALENDAR_ID,env=GOOGLE_CALENDAR_ID \
+            --secret id=VITE_GOOGLE_CALENDAR_API_KEY,env=GOOGLE_CALENDAR_API_KEY \
             -t brb-admin .
           docker run -d -p 3001:80 --name brb-admin brb-admin
           docker ps --filter name=brb-admin --format 'table {{.Names}}\t{{.Status}}\t{{.Ports}}'
