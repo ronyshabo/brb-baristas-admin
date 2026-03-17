@@ -11,51 +11,51 @@ import '../styles/Dashboard.css'
 function Dashboard({ user, googleAccessToken }) {
   const [activeTab, setActiveTab] = useState('events')
 
+  const operationsTabs = [
+    { id: 'events', label: 'Events Management' },
+    { id: 'bookings', label: 'Pending Bookings' },
+    { id: 'calendar', label: 'Calendar' },
+    { id: 'staff', label: 'Staff Management' },
+  ]
+
+  const websiteTabs = [
+    { id: 'posts', label: 'Website Posts' },
+    { id: 'places', label: 'Favorite Places' },
+    { id: 'community', label: 'Community Board' },
+  ]
+
   return (
     <div className="dashboard">
       <div className="tabs">
-        <button
-          className={`tab ${activeTab === 'events' ? 'active' : ''}`}
-          onClick={() => setActiveTab('events')}
-        >
-          Events Management
-        </button>
-        <button
-          className={`tab ${activeTab === 'bookings' ? 'active' : ''}`}
-          onClick={() => setActiveTab('bookings')}
-        >
-          Pending Bookings
-        </button>
-        <button
-          className={`tab ${activeTab === 'calendar' ? 'active' : ''}`}
-          onClick={() => setActiveTab('calendar')}
-        >
-          Calendar
-        </button>
-        <button
-          className={`tab ${activeTab === 'staff' ? 'active' : ''}`}
-          onClick={() => setActiveTab('staff')}
-        >
-          Staff Management
-        </button>
-        <button
-          className={`tab ${activeTab === 'posts' ? 'active' : ''}`}
-          onClick={() => setActiveTab('posts')}
-        >
-          Website Posts
-        </button>
-        <button
-          className={`tab ${activeTab === 'places' ? 'active' : ''}`}
-          onClick={() => setActiveTab('places')}
-        >
-          Favorite Places
-        </button>
-        <button
-          className={`tab ${activeTab === 'community' ? 'active' : ''}`}
-          onClick={() => setActiveTab('community')}
-        >
-          Community Board
-        </button>
+        <div className="tabs-group">
+          <p className="tabs-group-label">Operations</p>
+          <div className="tabs-row">
+            {operationsTabs.map((tab) => (
+              <button
+                key={tab.id}
+                className={`tab ${activeTab === tab.id ? 'active' : ''}`}
+                onClick={() => setActiveTab(tab.id)}
+              >
+                {tab.label}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <div className="tabs-group">
+          <p className="tabs-group-label">Website Content</p>
+          <div className="tabs-row">
+            {websiteTabs.map((tab) => (
+              <button
+                key={tab.id}
+                className={`tab ${activeTab === tab.id ? 'active' : ''}`}
+                onClick={() => setActiveTab(tab.id)}
+              >
+                {tab.label}
+              </button>
+            ))}
+          </div>
+        </div>
       </div>
       <div className="tab-content">
         {activeTab === 'events' && <EventsTab user={user} accessToken={googleAccessToken} />}
