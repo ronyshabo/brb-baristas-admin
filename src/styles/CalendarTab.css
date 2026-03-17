@@ -146,6 +146,54 @@
   color: #fff;
 }
 
+.website-visibility-panel {
+  margin-top: 1.5rem;
+  padding: 1rem;
+  border: 1px solid #dfe6e9;
+  border-radius: 8px;
+  background: #f8f9fa;
+}
+
+.website-visibility-panel h3 {
+  margin: 0;
+}
+
+.website-visibility-panel p {
+  color: #4b5563;
+}
+
+.website-visibility-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+}
+
+.website-visibility-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  border: 1px solid #e5e7eb;
+  border-radius: 6px;
+  background: #fff;
+  padding: 0.6rem 0.75rem;
+}
+
+.website-visibility-item-main {
+  display: flex;
+  flex-direction: column;
+}
+
+.website-visibility-title {
+  font-weight: 600;
+  color: #1f2937;
+}
+
+.website-visibility-meta {
+  color: #6b7280;
+  font-size: 0.9rem;
+}
+
 @media (max-width: 900px) {
   .calendar-grid {
     grid-template-columns: repeat(2, 1fr);

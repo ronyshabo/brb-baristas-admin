@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { collection, getDocs, query, where } from 'firebase/firestore'
+import { collection, doc, getDocs, query, updateDoc, where } from 'firebase/firestore'
 import { db } from '../firebase/config'
 import '../styles/CalendarTab.css'
 
@@ -24,11 +24,11 @@ const isSameDay = (dateA, dateB) => {
 function CalendarTab({ accessToken }) {
   const [currentDate, setCurrentDate] = useState(() => new Date())
   const [events, setEvents] = useState([])
-  const [adminEventIds, setAdminEventIds] = useState(new Set())
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
   const [showBaristasSchedule, setShowBaristasSchedule] = useState(true)
   const [showAdminEvents, setShowAdminEvents] = useState(true)
+  const [updatingWebsiteEventId, setUpdatingWebsiteEventId] = useState('')
 
   const calendarId = import.meta.env.VITE_GOOGLE_CALENDAR_ID
   const apiKey = import.meta.env.VITE_GOOGLE_CALENDAR_API_KEY
@@ -54,14 +54,17 @@ function CalendarTab({ accessToken }) {
         // Fetch admin event IDs first
         const q = query(collection(db, 'events'), where('googleCalendarEventId', '!=', null))
         const snapshot = await getDocs(q)
-        const ids = new Set()
-        snapshot.forEach(doc => {
-          const eventData = doc.data()
+        const adminEventsByGoogleId = {}
+        snapshot.forEach((entry) => {
+          const eventData = entry.data()
           if (eventData.googleCalendarEventId) {
-            ids.add(eventData.googleCalendarEventId)
+            adminEventsByGoogleId[eventData.googleCalendarEventId] = {
+              eventDocId: entry.id,
+              showOnWebsite: Boolean(eventData.showOnWebsite),
+              status: eventData.status,
+            }
           }
         })
-        setAdminEventIds(ids)
 
         const start = new Date(currentDate.getFullYear(), currentDate.getMonth(), 1)
         const end = new Date(currentDate.getFullYear(), currentDate.getMonth() + 1, 0, 23, 59, 59, 999)
@@ -82,6 +85,7 @@ function CalendarTab({ accessToken }) {
           throw new Error(apiMessage)
         }
         const calendarEvents = (data.items || []).map((event) => {
+          const adminEventData = adminEventsByGoogleId[event.id]
           const isAllDay = Boolean(event.start?.date)
           const startDate = parseEventDate(event.start?.dateTime || event.start?.date)
           const endDate = parseEventDate(event.end?.dateTime || event.end?.date)
@@ -92,7 +96,10 @@ function CalendarTab({ accessToken }) {
             start: startDate,
             end: endDate,
             allDay: isAllDay,
-            isAdmin: adminEventIds.has(event.id),
+            isAdmin: Boolean(adminEventData),
+            eventDocId: adminEventData?.eventDocId || null,
+            showOnWebsite: Boolean(adminEventData?.showOnWebsite),
+            status: adminEventData?.status || null,
           }
         })
 
@@ -107,6 +114,43 @@ function CalendarTab({ accessToken }) {
 
     fetchCalendarEvents()
   }, [calendarId, apiKey, accessToken, currentDate])
+
+  const adminEventsForWebsite = useMemo(() => (
+    events
+      .filter((event) => event.isAdmin && event.eventDocId)
+      .sort((left, right) => {
+        const leftStamp = left.start ? left.start.getTime() : 0
+        const rightStamp = right.start ? right.start.getTime() : 0
+        return leftStamp - rightStamp
+      })
+  ), [events])
+
+  const handleToggleWebsiteVisibility = async (calendarEvent) => {
+    if (!calendarEvent.eventDocId) {
+      return
+    }
+
+    const nextValue = !calendarEvent.showOnWebsite
+
+    try {
+      setUpdatingWebsiteEventId(calendarEvent.id)
+      await updateDoc(doc(db, 'events', calendarEvent.eventDocId), {
+        showOnWebsite: nextValue,
+        updatedAt: new Date(),
+      })
+
+      setEvents((previousEvents) => previousEvents.map((entry) => (
+        entry.id === calendarEvent.id
+          ? { ...entry, showOnWebsite: nextValue }
+          : entry
+      )))
+    } catch (err) {
+      console.error('Error updating website visibility:', err)
+      alert('Failed to update website visibility for this event.')
+    } finally {
+      setUpdatingWebsiteEventId('')
+    }
+  }
 
   const calendarDays = useMemo(() => {
     const year = currentDate.getFullYear()
@@ -182,42 +226,72 @@ function CalendarTab({ accessToken }) {
       {error && <p className="calendar-error">{error}</p>}
 
       {!loading && !error && (
-        <div className="calendar-grid">
-          {['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].map((day) => (
-            <div key={day} className="calendar-day-header">
-              {day}
-            </div>
-          ))}
+        <>
+          <div className="calendar-grid">
+            {['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].map((day) => (
+              <div key={day} className="calendar-day-header">
+                {day}
+              </div>
+            ))}
 
-          {calendarDays.map((day, index) => (
-            <div key={`${day?.toISOString() || 'empty'}-${index}`} className="calendar-day">
-              {day && (
-                <>
-                  <div className="calendar-date">{day.getDate()}</div>
-                  <div className="calendar-events">
-                    {events
-                      .filter((event) => event.start && isSameDay(event.start, day))
-                      .filter((event) => {
-                        if (event.isAdmin) return showAdminEvents
-                        return showBaristasSchedule
-                      })
-                      .map((event) => (
-                        <div
-                          key={event.id}
-                          className={`calendar-event ${event.isAdmin ? 'calendar-event-admin' : 'calendar-event-existing'}`}
-                        >
-                          <span className="calendar-event-time">
-                            {event.allDay ? 'All day' : formatTime(event.start)}
-                          </span>
-                          <span className="calendar-event-title">{event.title}</span>
-                        </div>
-                      ))}
-                  </div>
-                </>
-              )}
-            </div>
-          ))}
-        </div>
+            {calendarDays.map((day, index) => (
+              <div key={`${day?.toISOString() || 'empty'}-${index}`} className="calendar-day">
+                {day && (
+                  <>
+                    <div className="calendar-date">{day.getDate()}</div>
+                    <div className="calendar-events">
+                      {events
+                        .filter((event) => event.start && isSameDay(event.start, day))
+                        .filter((event) => {
+                          if (event.isAdmin) return showAdminEvents
+                          return showBaristasSchedule
+                        })
+                        .map((event) => (
+                          <div
+                            key={event.id}
+                            className={`calendar-event ${event.isAdmin ? 'calendar-event-admin' : 'calendar-event-existing'}`}
+                          >
+                            <span className="calendar-event-time">
+                              {event.allDay ? 'All day' : formatTime(event.start)}
+                            </span>
+                            <span className="calendar-event-title">{event.title}</span>
+                          </div>
+                        ))}
+                    </div>
+                  </>
+                )}
+              </div>
+            ))}
+          </div>
+
+          <div className="website-visibility-panel">
+            <h3>Website Visibility for Admin Events</h3>
+            <p>Checked events can appear in website upcoming shows once they are booked.</p>
+            {adminEventsForWebsite.length === 0 ? (
+              <p>No admin events found for this month.</p>
+            ) : (
+              <div className="website-visibility-list">
+                {adminEventsForWebsite.map((event) => (
+                  <label key={event.id} className="website-visibility-item">
+                    <div className="website-visibility-item-main">
+                      <span className="website-visibility-title">{event.title}</span>
+                      <span className="website-visibility-meta">
+                        {event.start ? event.start.toLocaleDateString() : 'Date TBA'}
+                        {event.status ? ` • ${event.status}` : ''}
+                      </span>
+                    </div>
+                    <input
+                      type="checkbox"
+                      checked={event.showOnWebsite}
+                      disabled={updatingWebsiteEventId === event.id}
+                      onChange={() => handleToggleWebsiteVisibility(event)}
+                    />
+                  </label>
+                ))}
+              </div>
+            )}
+          </div>
+        </>
       )}
     </div>
   )

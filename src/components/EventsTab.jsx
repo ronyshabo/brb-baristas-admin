@@ -19,6 +19,7 @@ const getInitialFormData = () => ({
   recurrenceMode: 'weeks',
   recurrenceWeeks: '1',
   recurrenceEndDate: '',
+  showOnWebsite: false,
 })
 
 // Helper function to convert 24-hour time to 12-hour format
@@ -255,6 +256,7 @@ function EventsTab({ user, accessToken }) {
             createdAt: new Date(),
             googleCalendarEventId,
             status: 'pending',
+            showOnWebsite: formData.showOnWebsite,
             isRecurring: formData.isRecurring,
             recurrenceMode: formData.isRecurring ? formData.recurrenceMode : null,
             recurrenceGroupId,
@@ -299,6 +301,7 @@ function EventsTab({ user, accessToken }) {
       recurrenceMode: 'weeks',
       recurrenceWeeks: '1',
       recurrenceEndDate: '',
+      showOnWebsite: Boolean(event.showOnWebsite),
     })
     setShowForm(true)
   }
@@ -320,6 +323,7 @@ function EventsTab({ user, accessToken }) {
         updatedAt: new Date(),
         googleCalendarEventId: editingEvent.googleCalendarEventId,
         status: editingEvent.status,
+        showOnWebsite: formData.showOnWebsite,
         createdAt: editingEvent.createdAt,
       }
       
@@ -696,6 +700,15 @@ function EventsTab({ user, accessToken }) {
             onChange={(e) => setFormData({ ...formData, bandEmail: e.target.value })}
             required
           />
+
+          <label className="recurrence-check">
+            <input
+              type="checkbox"
+              checked={formData.showOnWebsite}
+              onChange={(e) => setFormData({ ...formData, showOnWebsite: e.target.checked })}
+            />
+            Show this event on website upcoming shows
+          </label>
 
           {!editingEvent && (
             <div className="recurrence-box">
