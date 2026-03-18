@@ -15,6 +15,7 @@ function FavoritePlacesTab() {
   const [formData, setFormData] = useState({
     name: '',
     url: '',
+    logoUrl: '',
     description: '',
     active: true,
   })
@@ -51,12 +52,13 @@ function FavoritePlacesTab() {
       await addDoc(collection(db, 'favoritePlaces'), {
         name: formData.name.trim(),
         url: formData.url.trim(),
+        logoUrl: formData.logoUrl.trim(),
         description: formData.description.trim(),
         active: Boolean(formData.active),
         createdAt: new Date(),
       })
 
-      setFormData({ name: '', url: '', description: '', active: true })
+      setFormData({ name: '', url: '', logoUrl: '', description: '', active: true })
       await loadPlaces()
     } catch (error) {
       console.error('Error creating favorite place:', error)
@@ -116,6 +118,12 @@ function FavoritePlacesTab() {
           onChange={(event) => setFormData({ ...formData, url: event.target.value })}
           required
         />
+        <input
+          type="url"
+          placeholder="Logo image URL (optional)"
+          value={formData.logoUrl}
+          onChange={(event) => setFormData({ ...formData, logoUrl: event.target.value })}
+        />
         <textarea
           rows={3}
           placeholder="Description (optional)"
@@ -141,6 +149,13 @@ function FavoritePlacesTab() {
         {places.length === 0 && !loading ? <p>No places yet.</p> : null}
         {places.map((place) => (
           <article key={place.id} className="admin-content-card">
+            {place.logoUrl ? (
+              <img
+                src={place.logoUrl}
+                alt={`${place.name || place.title || 'Place'} logo`}
+                style={{ maxHeight: '60px', maxWidth: '160px', objectFit: 'contain', marginBottom: '0.5rem' }}
+              />
+            ) : null}
             <div className="admin-content-card-top">
               <h3>{place.name || place.title || 'Unnamed place'}</h3>
               <span className={`status-pill ${(place.active ?? true) ? 'live' : 'draft'}`}>
