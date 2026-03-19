@@ -3,9 +3,16 @@ import { addDoc, collection, deleteDoc, doc, getDocs, updateDoc } from 'firebase
 import { db } from '../firebase/config'
 import '../styles/AdminContentTabs.css'
 
-const DRINK_GROUP_OPTIONS = ['Coffee', 'Teas', 'Specialty', 'Decaf']
+const DRINK_GROUP_OPTIONS = ['Coffee', 'Tea', 'Decaf', 'Specialty']
 
-const sortByName = (left, right) => {
+const sortByGroupThenName = (left, right) => {
+  const leftGroup = DRINK_GROUP_OPTIONS.indexOf(left.group || left.category || 'Coffee')
+  const rightGroup = DRINK_GROUP_OPTIONS.indexOf(right.group || right.category || 'Coffee')
+
+  if (leftGroup !== rightGroup) {
+    return leftGroup - rightGroup
+  }
+
   const leftName = String(left.name || left.title || '').toLowerCase()
   const rightName = String(right.name || right.title || '').toLowerCase()
   return leftName.localeCompare(rightName)
@@ -14,12 +21,12 @@ const sortByName = (left, right) => {
 const normalizeDrinkGroup = (value) => {
   const trimmedValue = String(value || '').trim().toLowerCase()
 
-  if (trimmedValue === 'coffee') return 'Coffee'
-  if (trimmedValue === 'tea' || trimmedValue === 'teas') return 'Teas'
+  if (trimmedValue === 'coffee' || trimmedValue === 'coffee based drinks') return 'Coffee'
+  if (trimmedValue === 'tea' || trimmedValue === 'teas') return 'Tea'
   if (trimmedValue === 'specialty') return 'Specialty'
   if (trimmedValue === 'decaf') return 'Decaf'
 
-  return String(value || '').trim()
+  return 'Coffee'
 }
 
 function DrinksTab() {
@@ -44,7 +51,10 @@ function DrinksTab() {
         list.push({ id: entry.id, ...entry.data() })
       })
 
-      setDrinks(list.sort(sortByName))
+      setDrinks(list.map((entry) => ({
+        ...entry,
+        group: normalizeDrinkGroup(entry.group || entry.category || 'Coffee'),
+      })).sort(sortByGroupThenName))
     } catch (error) {
       console.error('Error loading drinks:', error)
     } finally {
@@ -125,6 +135,11 @@ function DrinksTab() {
     }
   }
 
+  const drinksByGroup = DRINK_GROUP_OPTIONS.map((groupName) => ({
+    groupName,
+    drinks: drinks.filter((drink) => normalizeDrinkGroup(drink.group || drink.category) === groupName),
+  }))
+
   return (
     <div className="admin-content-tab">
       <div className="admin-content-header">
@@ -140,19 +155,15 @@ function DrinksTab() {
           onChange={(event) => setFormData({ ...formData, name: event.target.value })}
           required
         />
-        <input
-          type="text"
-          list="drink-group-options"
-          placeholder="Group: Coffee, Teas, Specialty, or Decaf"
+        <select
           value={formData.group}
           onChange={(event) => setFormData({ ...formData, group: event.target.value })}
           required
-        />
-        <datalist id="drink-group-options">
+        >
           {DRINK_GROUP_OPTIONS.map((groupName) => (
-            <option key={groupName} value={groupName} />
+            <option key={groupName} value={groupName}>{groupName}</option>
           ))}
-        </datalist>
+        </select>
         <input
           type="text"
           placeholder="Price (example: $5.50)"
@@ -187,32 +198,43 @@ function DrinksTab() {
 
       {loading ? <p>Loading drinks...</p> : null}
 
-      <div className="admin-content-list">
-        {drinks.length === 0 && !loading ? <p>No drinks yet.</p> : null}
-        {drinks.map((drink) => (
-          <article key={drink.id} className="admin-content-card">
-            {drink.imageUrl ? (
-              <img className="admin-poster-image" src={drink.imageUrl} alt={drink.name || 'Drink'} />
-            ) : null}
-            <div className="admin-content-card-top">
-              <h3>{drink.name || 'Unnamed drink'}</h3>
-              <span className={`status-pill ${(drink.published ?? true) ? 'live' : 'draft'}`}>
-                {(drink.published ?? true) ? 'Visible' : 'Hidden'}
-              </span>
-            </div>
-            <p className="admin-content-meta">{drink.group || drink.category || 'Ungrouped'} • {drink.price || 'No price'}</p>
-            <p>{drink.description || 'No description.'}</p>
-            <div className="admin-card-actions">
-              <button type="button" onClick={() => handleTogglePublished(drink)}>
-                {(drink.published ?? true) ? 'Hide' : 'Show'}
-              </button>
-              <button type="button" className="danger" onClick={() => handleDeleteDrink(drink.id)}>
-                Delete
-              </button>
-            </div>
-          </article>
-        ))}
-      </div>
+      {drinks.length === 0 && !loading ? <p>No drinks yet.</p> : null}
+
+      {drinksByGroup.map(({ groupName, drinks: drinksInGroup }) => (
+        <section key={groupName} style={{ marginBottom: '1.5rem' }}>
+          <div className="admin-content-header">
+            <h3>{groupName}</h3>
+            <p>{drinksInGroup.length} drink{drinksInGroup.length === 1 ? '' : 's'} assigned to this website section.</p>
+          </div>
+
+          <div className="admin-content-list">
+            {drinksInGroup.length === 0 ? <p>No drinks in this section yet.</p> : null}
+            {drinksInGroup.map((drink) => (
+              <article key={drink.id} className="admin-content-card">
+                {drink.imageUrl ? (
+                  <img className="admin-poster-image" src={drink.imageUrl} alt={drink.name || 'Drink'} />
+                ) : null}
+                <div className="admin-content-card-top">
+                  <h3>{drink.name || 'Unnamed drink'}</h3>
+                  <span className={`status-pill ${(drink.published ?? true) ? 'live' : 'draft'}`}>
+                    {(drink.published ?? true) ? 'Visible' : 'Hidden'}
+                  </span>
+                </div>
+                <p className="admin-content-meta">{drink.group || drink.category || 'Ungrouped'} • {drink.price || 'No price'}</p>
+                <p>{drink.description || 'No description.'}</p>
+                <div className="admin-card-actions">
+                  <button type="button" onClick={() => handleTogglePublished(drink)}>
+                    {(drink.published ?? true) ? 'Hide' : 'Show'}
+                  </button>
+                  <button type="button" className="danger" onClick={() => handleDeleteDrink(drink.id)}>
+                    Delete
+                  </button>
+                </div>
+              </article>
+            ))}
+          </div>
+        </section>
+      ))}
     </div>
   )
 }
