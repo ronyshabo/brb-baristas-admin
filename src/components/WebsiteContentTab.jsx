@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import PostsTab from './PostsTab'
+import DrinksTab from './DrinksTab'
 import FavoritePlacesTab from './FavoritePlacesTab'
 import CommunityBoardTab from './CommunityBoardTab'
 
@@ -16,6 +17,12 @@ function WebsiteContentTab({ user }) {
           Posts
         </button>
         <button
+          className={`website-content-tab-button ${activeSection === 'drinks' ? 'active' : ''}`}
+          onClick={() => setActiveSection('drinks')}
+        >
+          Drinks
+        </button>
+        <button
           className={`website-content-tab-button ${activeSection === 'places' ? 'active' : ''}`}
           onClick={() => setActiveSection('places')}
         >
@@ -30,6 +37,7 @@ function WebsiteContentTab({ user }) {
       </div>
 
       {activeSection === 'posts' && <PostsTab user={user} />}
+      {activeSection === 'drinks' && <DrinksTab />}
       {activeSection === 'places' && <FavoritePlacesTab />}
       {activeSection === 'community' && <CommunityBoardTab />}
     </div>
