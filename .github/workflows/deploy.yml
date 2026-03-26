@@ -17,32 +17,56 @@ jobs:
           EC2_HOST: ${{ secrets.EC2_HOST }}
           EC2_USER: ${{ secrets.EC2_USER }}
           EC2_SSH_KEY: ${{ secrets.EC2_SSH_KEY }}
-          FIREBASE_API_KEY: ${{ secrets.FIREBASE_API_KEY }}
-          FIREBASE_AUTH_DOMAIN: ${{ secrets.FIREBASE_AUTH_DOMAIN }}
-          FIREBASE_PROJECT_ID: ${{ secrets.FIREBASE_PROJECT_ID }}
-          FIREBASE_STORAGE_BUCKET: ${{ secrets.FIREBASE_STORAGE_BUCKET }}
-          FIREBASE_MESSAGING_SENDER_ID: ${{ secrets.FIREBASE_MESSAGING_SENDER_ID }}
-          FIREBASE_APP_ID: ${{ secrets.FIREBASE_APP_ID }}
-          GOOGLE_CALENDAR_ID: ${{ secrets.GOOGLE_CALENDAR_ID }}
-          GOOGLE_CALENDAR_API_KEY: ${{ secrets.GOOGLE_CALENDAR_API_KEY }}
+          EC2_SSH_PORT: ${{ secrets.EC2_SSH_PORT }}
+          VITE_FIREBASE_API_KEY: ${{ secrets.VITE_FIREBASE_API_KEY }}
+          VITE_FIREBASE_AUTH_DOMAIN: ${{ secrets.VITE_FIREBASE_AUTH_DOMAIN }}
+          VITE_FIREBASE_PROJECT_ID: ${{ secrets.VITE_FIREBASE_PROJECT_ID }}
+          VITE_FIREBASE_STORAGE_BUCKET: ${{ secrets.VITE_FIREBASE_STORAGE_BUCKET }}
+          VITE_FIREBASE_MESSAGING_SENDER_ID: ${{ secrets.VITE_FIREBASE_MESSAGING_SENDER_ID }}
+          VITE_FIREBASE_APP_ID: ${{ secrets.VITE_FIREBASE_APP_ID }}
+          VITE_GOOGLE_CALENDAR_ID: ${{ secrets.VITE_GOOGLE_CALENDAR_ID }}
+          VITE_GOOGLE_CALENDAR_API_KEY: ${{ secrets.VITE_GOOGLE_CALENDAR_API_KEY }}
         run: |
           set -euo pipefail
-          FIREBASE_API_KEY_B64=$(printf %s "$FIREBASE_API_KEY" | base64 -w 0)
-          FIREBASE_AUTH_DOMAIN_B64=$(printf %s "$FIREBASE_AUTH_DOMAIN" | base64 -w 0)
-          FIREBASE_PROJECT_ID_B64=$(printf %s "$FIREBASE_PROJECT_ID" | base64 -w 0)
-          FIREBASE_STORAGE_BUCKET_B64=$(printf %s "$FIREBASE_STORAGE_BUCKET" | base64 -w 0)
-          FIREBASE_MESSAGING_SENDER_ID_B64=$(printf %s "$FIREBASE_MESSAGING_SENDER_ID" | base64 -w 0)
-          FIREBASE_APP_ID_B64=$(printf %s "$FIREBASE_APP_ID" | base64 -w 0)
-          GOOGLE_CALENDAR_ID_B64=$(printf %s "$GOOGLE_CALENDAR_ID" | base64 -w 0)
-          GOOGLE_CALENDAR_API_KEY_B64=$(printf %s "$GOOGLE_CALENDAR_API_KEY" | base64 -w 0)
+
+          required_vars=(
+            EC2_HOST
+            EC2_USER
+            EC2_SSH_KEY
+            EC2_SSH_PORT
+            VITE_FIREBASE_API_KEY
+            VITE_FIREBASE_AUTH_DOMAIN
+            VITE_FIREBASE_PROJECT_ID
+            VITE_FIREBASE_STORAGE_BUCKET
+            VITE_FIREBASE_MESSAGING_SENDER_ID
+            VITE_FIREBASE_APP_ID
+            VITE_GOOGLE_CALENDAR_ID
+            VITE_GOOGLE_CALENDAR_API_KEY
+          )
+
+          for var_name in "${required_vars[@]}"; do
+            if [ -z "${!var_name:-}" ]; then
+              echo "Missing required secret: $var_name"
+              exit 1
+            fi
+          done
+
+          VITE_FIREBASE_API_KEY_B64=$(printf %s "$VITE_FIREBASE_API_KEY" | base64 -w 0)
+          VITE_FIREBASE_AUTH_DOMAIN_B64=$(printf %s "$VITE_FIREBASE_AUTH_DOMAIN" | base64 -w 0)
+          VITE_FIREBASE_PROJECT_ID_B64=$(printf %s "$VITE_FIREBASE_PROJECT_ID" | base64 -w 0)
+          VITE_FIREBASE_STORAGE_BUCKET_B64=$(printf %s "$VITE_FIREBASE_STORAGE_BUCKET" | base64 -w 0)
+          VITE_FIREBASE_MESSAGING_SENDER_ID_B64=$(printf %s "$VITE_FIREBASE_MESSAGING_SENDER_ID" | base64 -w 0)
+          VITE_FIREBASE_APP_ID_B64=$(printf %s "$VITE_FIREBASE_APP_ID" | base64 -w 0)
+          VITE_GOOGLE_CALENDAR_ID_B64=$(printf %s "$VITE_GOOGLE_CALENDAR_ID" | base64 -w 0)
+          VITE_GOOGLE_CALENDAR_API_KEY_B64=$(printf %s "$VITE_GOOGLE_CALENDAR_API_KEY" | base64 -w 0)
 
           mkdir -p ~/.ssh
           echo "$EC2_SSH_KEY" > ~/.ssh/id_rsa
           chmod 600 ~/.ssh/id_rsa
-          ssh-keyscan -H $EC2_HOST >> ~/.ssh/known_hosts
+          ssh-keyscan -p "$EC2_SSH_PORT" -H "$EC2_HOST" >> ~/.ssh/known_hosts
           
           # SSH into EC2 and pull latest code, rebuild with secrets, restart
-          ssh -i ~/.ssh/id_rsa $EC2_USER@$EC2_HOST << EOF
+          ssh -p "$EC2_SSH_PORT" -i ~/.ssh/id_rsa "$EC2_USER@$EC2_HOST" << EOF
           set -euo pipefail
           cd ~/brb-baristas-admin
 
@@ -50,14 +74,14 @@ jobs:
           git checkout main
           git reset --hard origin/main
 
-          printf '%s' "$FIREBASE_API_KEY_B64" | base64 -d > /tmp/VITE_FIREBASE_API_KEY
-          printf '%s' "$FIREBASE_AUTH_DOMAIN_B64" | base64 -d > /tmp/VITE_FIREBASE_AUTH_DOMAIN
-          printf '%s' "$FIREBASE_PROJECT_ID_B64" | base64 -d > /tmp/VITE_FIREBASE_PROJECT_ID
-          printf '%s' "$FIREBASE_STORAGE_BUCKET_B64" | base64 -d > /tmp/VITE_FIREBASE_STORAGE_BUCKET
-          printf '%s' "$FIREBASE_MESSAGING_SENDER_ID_B64" | base64 -d > /tmp/VITE_FIREBASE_MESSAGING_SENDER_ID
-          printf '%s' "$FIREBASE_APP_ID_B64" | base64 -d > /tmp/VITE_FIREBASE_APP_ID
-          printf '%s' "$GOOGLE_CALENDAR_ID_B64" | base64 -d > /tmp/VITE_GOOGLE_CALENDAR_ID
-          printf '%s' "$GOOGLE_CALENDAR_API_KEY_B64" | base64 -d > /tmp/VITE_GOOGLE_CALENDAR_API_KEY
+          printf '%s' "$VITE_FIREBASE_API_KEY_B64" | base64 -d > /tmp/VITE_FIREBASE_API_KEY
+          printf '%s' "$VITE_FIREBASE_AUTH_DOMAIN_B64" | base64 -d > /tmp/VITE_FIREBASE_AUTH_DOMAIN
+          printf '%s' "$VITE_FIREBASE_PROJECT_ID_B64" | base64 -d > /tmp/VITE_FIREBASE_PROJECT_ID
+          printf '%s' "$VITE_FIREBASE_STORAGE_BUCKET_B64" | base64 -d > /tmp/VITE_FIREBASE_STORAGE_BUCKET
+          printf '%s' "$VITE_FIREBASE_MESSAGING_SENDER_ID_B64" | base64 -d > /tmp/VITE_FIREBASE_MESSAGING_SENDER_ID
+          printf '%s' "$VITE_FIREBASE_APP_ID_B64" | base64 -d > /tmp/VITE_FIREBASE_APP_ID
+          printf '%s' "$VITE_GOOGLE_CALENDAR_ID_B64" | base64 -d > /tmp/VITE_GOOGLE_CALENDAR_ID
+          printf '%s' "$VITE_GOOGLE_CALENDAR_API_KEY_B64" | base64 -d > /tmp/VITE_GOOGLE_CALENDAR_API_KEY
 
           export DOCKER_BUILDKIT=1
           docker build --no-cache \
