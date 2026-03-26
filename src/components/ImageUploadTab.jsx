@@ -1,6 +1,6 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { storage, db } from '../firebase/config'
-import { ref, uploadBytes, getDownloadURL, listAll, deleteObject } from 'firebase/storage'
+import { ref, uploadBytes, getDownloadURL, deleteObject } from 'firebase/storage'
 import { addDoc, collection, getDocs, deleteDoc, doc } from 'firebase/firestore'
 import '../styles/AdminContentTabs.css'
 
@@ -30,10 +30,10 @@ function ImageUploadTab() {
     }
   }
 
-  // Initial load
-  if (images.length === 0 && !uploading) {
+  // Load images on component mount
+  useEffect(() => {
     loadImages()
-  }
+  }, [])
 
   const handleFileSelect = (e) => {
     const file = e.target.files[0]
