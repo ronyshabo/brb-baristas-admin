@@ -3,7 +3,7 @@ import { addDoc, collection, deleteDoc, doc, getDocs, updateDoc } from 'firebase
 import { db } from '../firebase/config'
 import '../styles/AdminContentTabs.css'
 
-const DRINK_GROUP_OPTIONS = ['Coffee', 'Tea', 'Decaf', 'Specialty']
+const DRINK_GROUP_OPTIONS = ['Coffee', 'Tea', 'Decaf', 'Specialty', "Barista's Pick"]
 
 const sortByGroupThenName = (left, right) => {
   const leftGroup = DRINK_GROUP_OPTIONS.indexOf(left.group || left.category || 'Coffee')
@@ -25,6 +25,12 @@ const normalizeDrinkGroup = (value) => {
   if (trimmedValue === 'tea' || trimmedValue === 'teas') return 'Tea'
   if (trimmedValue === 'specialty') return 'Specialty'
   if (trimmedValue === 'decaf') return 'Decaf'
+  if (
+    trimmedValue === "barista's pick"
+    || trimmedValue === 'baristas pick'
+    || trimmedValue === 'barista pick'
+    || trimmedValue === 'barista’s pick'
+  ) return "Barista's Pick"
 
   return 'Coffee'
 }
