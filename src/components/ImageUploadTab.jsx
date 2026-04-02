@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react'
 import { storage, db } from '../firebase/config'
-import { ref, uploadBytes, getDownloadURL, deleteObject } from 'firebase/storage'
-import { addDoc, collection, getDocs, deleteDoc, doc } from 'firebase/firestore'
+import { ref, uploadBytes, getDownloadURL, deleteObject, list } from 'firebase/storage'
+import { addDoc, collection, getDocs, deleteDoc, doc, serverTimestamp } from 'firebase/firestore'
 import '../styles/AdminContentTabs.css'
 
 function ImageUploadTab() {
@@ -11,6 +11,8 @@ function ImageUploadTab() {
   const [selectedFile, setSelectedFile] = useState(null)
   const [imageTitle, setImageTitle] = useState('')
   const [imageCategory, setImageCategory] = useState('general')
+  const [storageStatus, setStorageStatus] = useState('checking')
+  const [uploadError, setUploadError] = useState(null)
 
   // Load images from Firestore metadata and Storage
   const loadImages = async () => {
@@ -30,8 +32,25 @@ function ImageUploadTab() {
     }
   }
 
-  // Load images on component mount
+  // Check storage connectivity and load images on mount
   useEffect(() => {
+    const checkStorage = async () => {
+      try {
+        const rootRef = ref(storage, 'images')
+        await list(rootRef, { maxResults: 1 })
+        setStorageStatus('connected')
+      } catch (error) {
+        console.error('Storage check failed:', error)
+        if (error.code === 'storage/unauthorized') {
+          setStorageStatus('unauthorized')
+        } else if (error.code === 'storage/invalid-default-bucket') {
+          setStorageStatus('no-bucket')
+        } else {
+          setStorageStatus('error')
+        }
+      }
+    }
+    checkStorage()
     loadImages()
   }, [])
 
@@ -60,6 +79,7 @@ function ImageUploadTab() {
 
     try {
       setUploading(true)
+      setUploadError(null)
 
       // Create a unique filename with timestamp
       const timestamp = Date.now()
@@ -79,7 +99,7 @@ function ImageUploadTab() {
         fileName: filename,
         downloadURL,
         storagePath: `images/${imageCategory}/${filename}`,
-        uploadedAt: new Date(),
+        uploadedAt: serverTimestamp(),
         fileSize: selectedFile.size,
         contentType: selectedFile.type,
       }
@@ -87,7 +107,7 @@ function ImageUploadTab() {
       const docRef = await addDoc(collection(db, 'images'), imageData)
 
       // Update local state
-      setImages([{ id: docRef.id, ...imageData }, ...images])
+      setImages([{ id: docRef.id, ...imageData, uploadedAt: new Date() }, ...images])
 
       // Reset form
       setSelectedFile(null)
@@ -98,7 +118,20 @@ function ImageUploadTab() {
       alert('Image uploaded successfully!')
     } catch (error) {
       console.error('Error uploading image:', error)
-      alert('Failed to upload image. Check console for details.')
+      let errorMsg = 'Failed to upload image.'
+      if (error.code === 'storage/unauthorized') {
+        errorMsg += ' Permission denied — Firebase Storage rules need to allow authenticated writes. Go to Firebase Console > Storage > Rules.'
+      } else if (error.code === 'storage/canceled') {
+        errorMsg += ' Upload was canceled.'
+      } else if (error.code === 'storage/unknown') {
+        errorMsg += ' Unknown error. Check your network connection and CORS settings.'
+      } else if (error.code === 'storage/invalid-default-bucket') {
+        errorMsg += ' Storage bucket is not configured. Check VITE_FIREBASE_STORAGE_BUCKET in your environment.'
+      } else {
+        errorMsg += ` ${error.code || ''}: ${error.message}`
+      }
+      setUploadError(errorMsg)
+      alert(errorMsg)
     } finally {
       setUploading(false)
     }
@@ -129,6 +162,31 @@ function ImageUploadTab() {
   return (
     <div className="admin-tab-container">
       <h2>Image Upload</h2>
+
+      {storageStatus === 'no-bucket' && (
+        <div style={{ background: '#fee', border: '1px solid #c00', padding: '12px', borderRadius: '6px', marginBottom: '16px' }}>
+          <strong>Storage not configured:</strong> The VITE_FIREBASE_STORAGE_BUCKET environment variable is missing or empty. Image uploads will not work until this is set.
+        </div>
+      )}
+      {storageStatus === 'unauthorized' && (
+        <div style={{ background: '#fff3e0', border: '1px solid #e65100', padding: '12px', borderRadius: '6px', marginBottom: '16px' }}>
+          <strong>Storage access denied:</strong> Firebase Storage security rules are blocking access. Go to <strong>Firebase Console → Storage → Rules</strong> and make sure authenticated users can read/write. Example rule:
+          <pre style={{ background: '#f5f5f5', padding: '8px', marginTop: '8px', fontSize: '13px' }}>{`rules_version = '2';
+service firebase.storage {
+  match /b/{bucket}/o {
+    match /images/{allPaths=**} {
+      allow read: if true;
+      allow write: if request.auth != null;
+    }
+  }
+}`}</pre>
+        </div>
+      )}
+      {uploadError && (
+        <div style={{ background: '#fee', border: '1px solid #c00', padding: '12px', borderRadius: '6px', marginBottom: '16px' }}>
+          {uploadError}
+        </div>
+      )}
 
       <form onSubmit={handleUploadImage} className="image-upload-form">
         <div className="form-group">
