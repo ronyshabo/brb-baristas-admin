@@ -7,7 +7,7 @@ const MAX_POSTS = 6
 
 function extractShortcode(input) {
   const trimmed = input.trim()
-  const match = trimmed.match(/instagram\.com\/p\/([A-Za-z0-9_-]+)/)
+  const match = trimmed.match(/instagram\.com\/(?:p|reel)\/([A-Za-z0-9_-]+)/)
   if (match) return match[1]
   // Treat as raw shortcode if no URL pattern found
   if (/^[A-Za-z0-9_-]+$/.test(trimmed)) return trimmed
