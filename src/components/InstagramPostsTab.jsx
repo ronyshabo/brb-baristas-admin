@@ -1,31 +1,63 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useRef, useCallback } from 'react'
 import { addDoc, collection, deleteDoc, doc, getDocs, updateDoc } from 'firebase/firestore'
 import { db } from '../firebase/config'
 import '../styles/AdminContentTabs.css'
 
 const MAX_POSTS = 6
 
-function extractShortcode(input) {
-  const trimmed = input.trim()
-  const match = trimmed.match(/instagram\.com\/(?:p|reel)\/([A-Za-z0-9_-]+)/)
-  if (match) return match[1]
-  // Treat as raw shortcode if no URL pattern found
-  if (/^[A-Za-z0-9_-]+$/.test(trimmed)) return trimmed
-  return null
+function extractPermalink(embedHtml) {
+  const match = embedHtml.match(/instagram\.com\/(?:p|reel)\/([A-Za-z0-9_-]+)/)
+  return match ? match[1] : null
+}
+
+function stripEmbedScript(html) {
+  // Remove the <script> tag — we load embed.js globally
+  return html.replace(/<script[^>]*>.*?<\/script>/gi, '').trim()
+}
+
+function processInstgram() {
+  if (window.instgrm?.Embeds) {
+    window.instgrm.Embeds.process()
+  }
+}
+
+function loadEmbedScript() {
+  if (document.querySelector('script[src*="instagram.com/embed.js"]')) {
+    processInstgram()
+    return
+  }
+  const script = document.createElement('script')
+  script.src = 'https://www.instagram.com/embed.js'
+  script.async = true
+  script.onload = processInstgram
+  document.body.appendChild(script)
+}
+
+function EmbedPreview({ html }) {
+  const containerRef = useRef(null)
+
+  useEffect(() => {
+    if (containerRef.current) {
+      containerRef.current.innerHTML = html
+      loadEmbedScript()
+    }
+  }, [html])
+
+  return <div ref={containerRef} className="ig-embed-container" />
 }
 
 function InstagramPostsTab() {
   const [posts, setPosts] = useState([])
   const [loading, setLoading] = useState(true)
   const [formData, setFormData] = useState({
-    urlOrShortcode: '',
+    embedCode: '',
     caption: '',
     order: '',
   })
   const [editingId, setEditingId] = useState(null)
   const [editData, setEditData] = useState({ caption: '', order: '' })
 
-  const loadPosts = async () => {
+  const loadPosts = useCallback(async () => {
     try {
       setLoading(true)
       const snapshot = await getDocs(collection(db, 'instagramPosts'))
@@ -40,38 +72,52 @@ function InstagramPostsTab() {
     } finally {
       setLoading(false)
     }
-  }
+  }, [])
 
   useEffect(() => {
     loadPosts()
-  }, [])
+  }, [loadPosts])
+
+  // Re-process embeds when posts change
+  useEffect(() => {
+    if (posts.length > 0) {
+      setTimeout(loadEmbedScript, 300)
+    }
+  }, [posts])
 
   const handleAdd = async (event) => {
     event.preventDefault()
 
-    const shortcode = extractShortcode(formData.urlOrShortcode)
-    if (!shortcode) {
-      alert('Please enter a valid Instagram URL or shortcode.')
+    const embedHtml = formData.embedCode.trim()
+    if (!embedHtml.includes('instagram.com')) {
+      alert('Please paste a valid Instagram embed code.\n\nTo get it: open the Instagram post → click ••• → Embed → Copy embed code.')
       return
     }
 
-    // Check for duplicate shortcode
+    const shortcode = extractPermalink(embedHtml)
+    if (!shortcode) {
+      alert('Could not find an Instagram post URL in the embed code.')
+      return
+    }
+
     if (posts.some((p) => p.shortcode === shortcode)) {
       alert('This Instagram post is already added.')
       return
     }
 
     try {
+      const cleanHtml = stripEmbedScript(embedHtml)
       const postUrl = `https://www.instagram.com/p/${shortcode}/`
       const payload = {
         shortcode,
         postUrl,
+        embedHtml: cleanHtml,
         caption: formData.caption.trim(),
         order: formData.order !== '' ? Number(formData.order) : 9999,
         createdAt: new Date(),
       }
       await addDoc(collection(db, 'instagramPosts'), payload)
-      setFormData({ urlOrShortcode: '', caption: '', order: '' })
+      setFormData({ embedCode: '', caption: '', order: '' })
       await loadPosts()
     } catch (error) {
       console.error('Error adding Instagram post:', error)
@@ -117,7 +163,8 @@ function InstagramPostsTab() {
     }
   }
 
-  const previewShortcode = extractShortcode(formData.urlOrShortcode)
+  const previewShortcode = extractPermalink(formData.embedCode)
+  const previewHtml = previewShortcode ? stripEmbedScript(formData.embedCode.trim()) : null
 
   return (
     <div className="admin-content-tab">
@@ -127,6 +174,9 @@ function InstagramPostsTab() {
           Manage embedded Instagram posts shown on the website.
           The public site displays up to {MAX_POSTS} posts sorted by order.
         </p>
+        <p className="admin-content-meta">
+          <strong>How to get the embed code:</strong> Open the post on Instagram → click <strong>•••</strong> → <strong>Embed</strong> → <strong>Copy embed code</strong>
+        </p>
         {posts.length > MAX_POSTS && (
           <p className="ig-warning">
             ⚠ You have {posts.length} posts pinned — only the first {MAX_POSTS} (by order) will appear on the website.
@@ -135,11 +185,11 @@ function InstagramPostsTab() {
       </div>
 
       <form className="admin-content-form" onSubmit={handleAdd}>
-        <input
-          type="text"
-          placeholder="Instagram URL or shortcode (e.g. CaUsPbUquKV)"
-          value={formData.urlOrShortcode}
-          onChange={(e) => setFormData({ ...formData, urlOrShortcode: e.target.value })}
+        <textarea
+          rows={5}
+          placeholder="Paste Instagram embed code here..."
+          value={formData.embedCode}
+          onChange={(e) => setFormData({ ...formData, embedCode: e.target.value })}
           required
         />
         <input
@@ -155,16 +205,10 @@ function InstagramPostsTab() {
           onChange={(e) => setFormData({ ...formData, order: e.target.value })}
         />
 
-        {previewShortcode && (
+        {previewHtml && (
           <div className="ig-preview">
             <p className="ig-preview-label">Preview for <strong>{previewShortcode}</strong>:</p>
-            <iframe
-              src={`https://www.instagram.com/p/${encodeURIComponent(previewShortcode)}/embed/`}
-              className="ig-preview-iframe"
-              title={`Instagram post ${previewShortcode}`}
-              loading="lazy"
-              allowTransparency="true"
-            />
+            <EmbedPreview html={previewHtml} />
           </div>
         )}
 
@@ -189,13 +233,15 @@ function InstagramPostsTab() {
                 <span className="status-pill live">Visible #{index + 1}</span>
               )}
 
-              <iframe
-                src={`https://www.instagram.com/p/${encodeURIComponent(post.shortcode)}/embed/`}
-                className="ig-card-iframe"
-                title={post.caption || `Instagram post ${post.shortcode}`}
-                loading="lazy"
-                allowTransparency="true"
-              />
+              {post.embedHtml ? (
+                <EmbedPreview html={post.embedHtml} />
+              ) : (
+                <div className="admin-content-meta">
+                  <a href={post.postUrl} target="_blank" rel="noopener noreferrer">
+                    View on Instagram ↗
+                  </a>
+                </div>
+              )}
 
               {editingId === post.id ? (
                 <div className="ig-edit-form">
