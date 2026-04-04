@@ -4,6 +4,7 @@ import DrinksTab from './DrinksTab'
 import FavoritePlacesTab from './FavoritePlacesTab'
 import CommunityBoardTab from './CommunityBoardTab'
 import ImageUploadTab from './ImageUploadTab'
+import InstagramPostsTab from './InstagramPostsTab'
 
 function WebsiteContentTab({ user }) {
   const [activeSection, setActiveSection] = useState('posts')
@@ -41,6 +42,12 @@ function WebsiteContentTab({ user }) {
         >
           Images
         </button>
+        <button
+          className={`website-content-tab-button ${activeSection === 'instagram' ? 'active' : ''}`}
+          onClick={() => setActiveSection('instagram')}
+        >
+          Instagram
+        </button>
       </div>
 
       {activeSection === 'posts' && <PostsTab user={user} />}
@@ -48,6 +55,7 @@ function WebsiteContentTab({ user }) {
       {activeSection === 'places' && <FavoritePlacesTab />}
       {activeSection === 'community' && <CommunityBoardTab />}
       {activeSection === 'images' && <ImageUploadTab />}
+      {activeSection === 'instagram' && <InstagramPostsTab />}
     </div>
   )
 }

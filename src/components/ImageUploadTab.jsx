@@ -212,9 +212,7 @@ service firebase.storage {
             <option value="general">General</option>
             <option value="drinks">Drinks</option>
             <option value="events">Events</option>
-            <option value="favorites">Favorite Places</option>
             <option value="community">Community</option>
-            <option value="gallery">Gallery</option>
           </select>
         </div>
 
