@@ -62,8 +62,10 @@ function InstagramPostsTab() {
     }
 
     try {
+      const postUrl = `https://www.instagram.com/p/${shortcode}/`
       const payload = {
         shortcode,
+        postUrl,
         caption: formData.caption.trim(),
         order: formData.order !== '' ? Number(formData.order) : 9999,
         createdAt: new Date(),
