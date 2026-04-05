@@ -222,6 +222,21 @@
   background: #229954;
 }
 
+.by-hour-description {
+  color: #34495e;
+  font-size: 0.95rem;
+  line-height: 1.5;
+  margin: 0;
+}
+
+.unmatched-warning {
+  background: #fff3cd;
+  color: #856404 !important;
+  padding: 0.75rem 1rem;
+  border-radius: 6px;
+  border-left: 4px solid #ffc107;
+}
+
 /* Calculate Button */
 .calculate-btn {
   width: 100%;

@@ -18,6 +18,8 @@ function StaffTab({ user, accessToken }) {
   const [editingBarista, setEditingBarista] = useState(null)
   const [syncingBaristas, setSyncingBaristas] = useState(false)
   const [hasAutoSyncedMonth, setHasAutoSyncedMonth] = useState(false)
+  const [squareData, setSquareData] = useState('')
+  const [weekShifts, setWeekShifts] = useState([])
 
   const calendarId = import.meta.env.VITE_GOOGLE_CALENDAR_ID
 
@@ -220,6 +222,8 @@ function StaffTab({ user, accessToken }) {
       // Process schedule by day
       const schedule = processSchedule(data.items, weekStart)
       setWeekSchedule(schedule)
+      const shifts = extractShifts(data.items)
+      setWeekShifts(shifts)
       setSelectedWeek(formatDateKey(weekStart))
       alert('Schedule loaded successfully!')
     } catch (err) {
@@ -309,6 +313,21 @@ function StaffTab({ user, accessToken }) {
     return schedule
   }
 
+  const extractShifts = (events) => {
+    const shifts = []
+    events.forEach(event => {
+      if (!event.start?.dateTime || !event.summary) return
+      const bracketMatch = event.summary.match(/^\[([^,]+),\s*([^\]]+)\]/)
+      if (!bracketMatch) return
+      shifts.push({
+        barista: bracketMatch[1].trim(),
+        start: new Date(event.start.dateTime),
+        end: new Date(event.end.dateTime)
+      })
+    })
+    return shifts
+  }
+
   const parseBulkTips = () => {
     const raw = bulkTipData.trim()
     if (!raw) {
@@ -387,6 +406,138 @@ function StaffTab({ user, accessToken }) {
 
     setDailyTips((prev) => ({ ...prev, ...tips }))
     alert(`Parsed ${parsedCount} tip ${parsedCount === 1 ? 'entry' : 'entries'}`)
+  }
+
+  const parseSquareAndCalculate = () => {
+    const raw = squareData.trim()
+    if (!raw) {
+      alert('Please paste Square transaction data first')
+      return
+    }
+    if (weekShifts.length === 0) {
+      alert('Please load the schedule from calendar first')
+      return
+    }
+
+    const lines = raw.split('\n').map(l => l.trim()).filter(Boolean)
+
+    // Auto-detect delimiter (tab vs comma)
+    const firstFewLines = lines.slice(0, 5).join('\n')
+    const delimiter = firstFewLines.includes('\t') ? '\t' : ','
+
+    // Find header line containing "Date" and "Tip"
+    let headerIndex = -1
+    let headers = []
+    for (let i = 0; i < Math.min(lines.length, 20); i++) {
+      const cols = lines[i].split(delimiter).map(c => c.trim().toLowerCase())
+      if (cols.includes('date') && cols.includes('tip')) {
+        headerIndex = i
+        headers = cols
+        break
+      }
+    }
+
+    if (headerIndex === -1) {
+      alert('Could not find header row with "Date" and "Tip" columns. Make sure the pasted data includes column headers.')
+      return
+    }
+
+    const dateIdx = headers.indexOf('date')
+    const tipIdx = headers.indexOf('tip')
+    const timeIdx = headers.indexOf('time')
+
+    const transactions = []
+    for (let i = headerIndex + 1; i < lines.length; i++) {
+      const line = lines[i]
+      if (!line || /^(card|cash|total|summary)/i.test(line)) continue
+
+      const cols = delimiter === ','
+        ? line.match(/("([^"]*)"|[^,]*)/g)?.map(c => c.replace(/^"|"$/g, '').trim()) || []
+        : line.split(delimiter).map(c => c.trim())
+      if (cols.length <= Math.max(dateIdx, tipIdx)) continue
+
+      let dateStr = cols[dateIdx]
+      if (!dateStr) continue
+
+      // If there's a separate time column, combine
+      if (timeIdx >= 0 && cols[timeIdx]) {
+        dateStr = `${dateStr} ${cols[timeIdx]}`
+      }
+
+      const parsedDate = new Date(dateStr)
+      if (isNaN(parsedDate.getTime())) continue
+
+      const tipStr = cols[tipIdx]
+      if (!tipStr) continue
+      const tipAmount = parseFloat(tipStr.replace(/[$,]/g, ''))
+      if (isNaN(tipAmount) || tipAmount <= 0) continue
+
+      transactions.push({ date: parsedDate, tip: tipAmount })
+    }
+
+    if (transactions.length === 0) {
+      alert('No valid transactions with tips found. Check that the data includes Date and Tip columns.')
+      return
+    }
+
+    // Calculate by-hour tips
+    const baristaEarnings = {}
+    let unmatchedTips = 0
+    let unmatchedCount = 0
+
+    transactions.forEach(tx => {
+      const workingBaristas = [...new Set(
+        weekShifts
+          .filter(shift => tx.date >= shift.start && tx.date <= shift.end)
+          .map(shift => shift.barista)
+      )]
+
+      if (workingBaristas.length === 0) {
+        unmatchedTips += tx.tip
+        unmatchedCount++
+        return
+      }
+
+      const share = tx.tip / workingBaristas.length
+      workingBaristas.forEach(name => {
+        if (!baristaEarnings[name]) {
+          baristaEarnings[name] = { tips: 0, hours: 0, shifts: 0, basePay: 0, total: 0, transactions: 0 }
+        }
+        baristaEarnings[name].tips += share
+        baristaEarnings[name].transactions++
+      })
+    })
+
+    // Calculate hours and shifts from calendar data
+    Object.keys(baristaEarnings).forEach(name => {
+      const shifts = weekShifts.filter(s => s.barista === name)
+      const uniqueDays = new Set(shifts.map(s => formatDateKey(s.start)))
+      baristaEarnings[name].shifts = uniqueDays.size
+      baristaEarnings[name].hours = shifts.reduce((sum, s) => {
+        return sum + (s.end - s.start) / (1000 * 60 * 60)
+      }, 0)
+      const baristaRecord = baristas.find(b => b.name === name)
+      baristaEarnings[name].basePay = (baristaRecord?.basePay || 0) * baristaEarnings[name].shifts
+      baristaEarnings[name].total = baristaEarnings[name].tips + baristaEarnings[name].basePay
+    })
+
+    const totalTips = transactions.reduce((sum, tx) => sum + tx.tip, 0)
+
+    setCalculation({
+      weekStart: selectedWeek || formatDateKey(transactions[0].date),
+      weekEnd: selectedWeek
+        ? formatDateKey(new Date(parseDateInput(selectedWeek).getTime() + 6 * 24 * 60 * 60 * 1000))
+        : formatDateKey(transactions[transactions.length - 1].date),
+      earnings: baristaEarnings,
+      totalTips,
+      unmatchedTips,
+      unmatchedCount,
+      matchedTransactions: transactions.length - unmatchedCount,
+      totalTransactions: transactions.length,
+      isByHour: true
+    })
+
+    alert(`Parsed ${transactions.length} transactions with tips. ${unmatchedCount > 0 ? `${unmatchedCount} transactions ($${unmatchedTips.toFixed(2)}) could not be matched to any barista shift.` : 'All matched to shifts.'}`)
   }
 
   const calculateTips = () => {
@@ -539,9 +690,12 @@ function StaffTab({ user, accessToken }) {
                   <button onClick={() => setTipInputMethod('bulk')} className={tipInputMethod === 'bulk' ? 'active' : ''}>
                     Bulk Paste
                   </button>
+                  <button onClick={() => setTipInputMethod('byHour')} className={tipInputMethod === 'byHour' ? 'active' : ''}>
+                    By-Hour Tip Out
+                  </button>
                 </div>
 
-                {tipInputMethod === 'manual' ? (
+                {tipInputMethod === 'manual' && (
                   <div className="manual-entry">
                     {Object.keys(weekSchedule).map(date => (
                       <div key={date} className="daily-tip-input">
@@ -556,7 +710,9 @@ function StaffTab({ user, accessToken }) {
                       </div>
                     ))}
                   </div>
-                ) : (
+                )}
+
+                {tipInputMethod === 'bulk' && (
                   <div className="bulk-entry">
                     <textarea 
                       placeholder="Paste GoDaddy tip report here..."
@@ -567,15 +723,38 @@ function StaffTab({ user, accessToken }) {
                     <button onClick={parseBulkTips}>Parse Tip Data</button>
                   </div>
                 )}
+
+                {tipInputMethod === 'byHour' && (
+                  <div className="bulk-entry">
+                    <p className="by-hour-description">Paste your Square transaction report below. The data should include <strong>Date</strong> and <strong>Tip</strong> columns (tab or comma separated). Tips will be split equally among baristas working at the time of each transaction.</p>
+                    <textarea 
+                      placeholder="Paste Square transaction report here (with Date and Tip columns)..."
+                      value={squareData}
+                      onChange={(e) => setSquareData(e.target.value)}
+                      rows={10}
+                    />
+                    <button onClick={parseSquareAndCalculate}>Parse & Calculate Tips</button>
+                  </div>
+                )}
               </div>
 
-              <button onClick={calculateTips} className="calculate-btn">Calculate Tips</button>
+              {tipInputMethod !== 'byHour' && (
+                <button onClick={calculateTips} className="calculate-btn">Calculate Tips</button>
+              )}
 
               {calculation && (
                 <div className="calculation-results">
                   <h4>Calculation Results</h4>
                   <p><strong>Week:</strong> {calculation.weekStart} to {calculation.weekEnd}</p>
                   <p><strong>Total Tips:</strong> ${calculation.totalTips.toFixed(2)}</p>
+                  {calculation.isByHour && (
+                    <>
+                      <p><strong>Matched Transactions:</strong> {calculation.matchedTransactions} of {calculation.totalTransactions}</p>
+                      {calculation.unmatchedTips > 0 && (
+                        <p className="unmatched-warning"><strong>Unmatched Tips:</strong> ${calculation.unmatchedTips.toFixed(2)} ({calculation.unmatchedCount} transactions outside any shift)</p>
+                      )}
+                    </>
+                  )}
                   
                   <table className="earnings-table">
                     <thead>
@@ -585,6 +764,7 @@ function StaffTab({ user, accessToken }) {
                         <th>Hours</th>
                         <th>Base Pay</th>
                         <th>Tips</th>
+                        {calculation.isByHour && <th>Txns</th>}
                         <th>Total</th>
                       </tr>
                     </thead>
@@ -596,7 +776,8 @@ function StaffTab({ user, accessToken }) {
                           <td>{data.hours.toFixed(1)}</td>
                           <td>${data.basePay.toFixed(2)}</td>
                           <td>${data.tips.toFixed(2)}</td>
-                          <td><strong>${data.total.toFixed(2)}</strong></td>
+                          {calculation.isByHour && <td>{data.transactions || 0}</td>}
+                          <td><strong>${(data.total || data.tips).toFixed(2)}</strong></td>
                         </tr>
                       ))}
                     </tbody>
