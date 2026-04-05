@@ -421,62 +421,91 @@ function StaffTab({ user, accessToken }) {
 
     const lines = raw.split('\n').map(l => l.trim()).filter(Boolean)
 
-    // Auto-detect delimiter (tab vs comma)
-    const firstFewLines = lines.slice(0, 5).join('\n')
-    const delimiter = firstFewLines.includes('\t') ? '\t' : ','
-
-    // Find header line containing "Date" and "Tip"
-    let headerIndex = -1
-    let headers = []
-    for (let i = 0; i < Math.min(lines.length, 20); i++) {
-      const cols = lines[i].split(delimiter).map(c => c.trim().toLowerCase())
-      if (cols.includes('date') && cols.includes('tip')) {
-        headerIndex = i
-        headers = cols
-        break
-      }
-    }
-
-    if (headerIndex === -1) {
-      alert('Could not find header row with "Date" and "Tip" columns. Make sure the pasted data includes column headers.')
-      return
-    }
-
-    const dateIdx = headers.indexOf('date')
-    const tipIdx = headers.indexOf('tip')
-    const timeIdx = headers.indexOf('time')
+    // Detect format: tab-separated single-line rows vs multi-line (one cell per line)
+    const hasTabHeader = lines.some(l => /\t/.test(l) && /date/i.test(l) && /tip/i.test(l))
 
     const transactions = []
-    for (let i = headerIndex + 1; i < lines.length; i++) {
-      const line = lines[i]
-      if (!line || /^(card|cash|total|summary)/i.test(line)) continue
 
-      const cols = delimiter === ','
-        ? line.match(/("([^"]*)"|[^,]*)/g)?.map(c => c.replace(/^"|"$/g, '').trim()) || []
-        : line.split(delimiter).map(c => c.trim())
-      if (cols.length <= Math.max(dateIdx, tipIdx)) continue
-
-      let dateStr = cols[dateIdx]
-      if (!dateStr) continue
-
-      // If there's a separate time column, combine
-      if (timeIdx >= 0 && cols[timeIdx]) {
-        dateStr = `${dateStr} ${cols[timeIdx]}`
+    if (hasTabHeader) {
+      // Tab-separated format: each row is a single line
+      let headerIndex = -1
+      let headers = []
+      for (let i = 0; i < Math.min(lines.length, 20); i++) {
+        const cols = lines[i].split('\t').map(c => c.trim().toLowerCase())
+        if (cols.includes('date') && cols.includes('tip')) {
+          headerIndex = i
+          headers = cols
+          break
+        }
       }
+      if (headerIndex === -1) {
+        alert('Could not find header row with "Date" and "Tip" columns.')
+        return
+      }
+      const dateIdx = headers.indexOf('date')
+      const tipIdx = headers.indexOf('tip')
+      const timeIdx = headers.indexOf('time')
 
-      const parsedDate = new Date(dateStr)
-      if (isNaN(parsedDate.getTime())) continue
+      for (let i = headerIndex + 1; i < lines.length; i++) {
+        const cols = lines[i].split('\t').map(c => c.trim())
+        if (cols.length <= Math.max(dateIdx, tipIdx)) continue
+        let dateStr = cols[dateIdx]
+        if (!dateStr) continue
+        if (timeIdx >= 0 && cols[timeIdx]) dateStr = `${dateStr} ${cols[timeIdx]}`
+        const parsedDate = new Date(dateStr)
+        if (isNaN(parsedDate.getTime())) continue
+        const tipAmount = parseFloat((cols[tipIdx] || '').replace(/[$,]/g, ''))
+        if (isNaN(tipAmount) || tipAmount <= 0) continue
+        transactions.push({ date: parsedDate, tip: tipAmount })
+      }
+    } else {
+      // Multi-line format: each cell is on its own line when copy-pasted from Square
+      // Pattern: date line (M/D/YYYY), time line (H:MM AM/PM), then other fields,
+      // then $ amounts at the end (Subtotal, Tip, Surcharge, Debit Cashback, Total)
+      const dateRegex = /^\d{1,2}\/\d{1,2}\/\d{2,4}$/
+      const timeRegex = /^\d{1,2}:\d{2}\s*(AM|PM)$/i
+      const amountRegex = /^\$[\d,]+\.\d{2}$/
 
-      const tipStr = cols[tipIdx]
-      if (!tipStr) continue
-      const tipAmount = parseFloat(tipStr.replace(/[$,]/g, ''))
-      if (isNaN(tipAmount) || tipAmount <= 0) continue
+      let i = 0
+      // Skip header line if present
+      if (/date/i.test(lines[0]) && /tip/i.test(lines[0])) i = 1
 
-      transactions.push({ date: parsedDate, tip: tipAmount })
+      while (i < lines.length) {
+        // Find a date line
+        if (!dateRegex.test(lines[i])) { i++; continue }
+
+        const datePart = lines[i]
+        i++
+
+        // Next line should be time
+        if (i >= lines.length || !timeRegex.test(lines[i])) continue
+        const timePart = lines[i]
+        i++
+
+        const parsedDate = new Date(`${datePart} ${timePart}`)
+        if (isNaN(parsedDate.getTime())) continue
+
+        // Scan forward to find the $ amount lines (Subtotal, Tip, Surcharge, Debit Cashback, Total)
+        const amounts = []
+        while (i < lines.length && !dateRegex.test(lines[i])) {
+          if (amountRegex.test(lines[i])) {
+            amounts.push(parseFloat(lines[i].replace(/[$,]/g, '')))
+          }
+          i++
+        }
+
+        // Amounts order: Subtotal, Tip, Surcharge, Debit Cashback, Total
+        if (amounts.length >= 5) {
+          const tipAmount = amounts[1] // Tip is the 2nd amount
+          if (tipAmount > 0) {
+            transactions.push({ date: parsedDate, tip: tipAmount })
+          }
+        }
+      }
     }
 
     if (transactions.length === 0) {
-      alert('No valid transactions with tips found. Check that the data includes Date and Tip columns.')
+      alert('No valid transactions with tips found. Make sure the pasted data includes the full Square report with dates, times, and dollar amounts.')
       return
     }
 
