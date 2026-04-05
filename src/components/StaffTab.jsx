@@ -422,11 +422,13 @@ function StaffTab({ user, accessToken }) {
     const lines = raw.split('\n').map(l => l.trim()).filter(Boolean)
 
     // Detect format: tab-separated single-line rows vs multi-line (one cell per line)
-    const hasTabHeader = lines.some(l => /\t/.test(l) && /date/i.test(l) && /tip/i.test(l))
+    // Check if data rows (not just header) are also tab-separated
+    const headerLineIdx = lines.findIndex(l => /\t/.test(l) && /date/i.test(l) && /tip/i.test(l))
+    const hasTabData = headerLineIdx >= 0 && lines.slice(headerLineIdx + 1, headerLineIdx + 5).some(l => /\t/.test(l))
 
     const transactions = []
 
-    if (hasTabHeader) {
+    if (hasTabData) {
       // Tab-separated format: each row is a single line
       let headerIndex = -1
       let headers = []
@@ -467,8 +469,8 @@ function StaffTab({ user, accessToken }) {
       const amountRegex = /^\$[\d,]+\.\d{2}$/
 
       let i = 0
-      // Skip header line if present
-      if (/date/i.test(lines[0]) && /tip/i.test(lines[0])) i = 1
+      // Skip header lines (tab-separated or containing column names)
+      while (i < lines.length && (/date/i.test(lines[i]) && /tip/i.test(lines[i]))) i++
 
       while (i < lines.length) {
         // Find a date line
@@ -485,17 +487,21 @@ function StaffTab({ user, accessToken }) {
         const parsedDate = new Date(`${datePart} ${timePart}`)
         if (isNaN(parsedDate.getTime())) continue
 
-        // Scan forward to find the $ amount lines (Subtotal, Tip, Surcharge, Debit Cashback, Total)
+        // Scan forward to find the $ amount lines
+        // Card: Subtotal, Tip, Surcharge, Debit Cashback, Total (5 amounts)
+        // Cash: Subtotal, Tip, Surcharge, Total (4 amounts)
         const amounts = []
         while (i < lines.length && !dateRegex.test(lines[i])) {
+          // Stop at section headers like "Cash Payments (31)" or "Total"
+          if (/^(cash payments|total$)/i.test(lines[i])) break
           if (amountRegex.test(lines[i])) {
             amounts.push(parseFloat(lines[i].replace(/[$,]/g, '')))
           }
           i++
         }
 
-        // Amounts order: Subtotal, Tip, Surcharge, Debit Cashback, Total
-        if (amounts.length >= 5) {
+        // Tip is always the 2nd amount regardless of section (4 or 5 amounts)
+        if (amounts.length >= 4) {
           const tipAmount = amounts[1] // Tip is the 2nd amount
           if (tipAmount > 0) {
             transactions.push({ date: parsedDate, tip: tipAmount })
