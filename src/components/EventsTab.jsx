@@ -48,6 +48,23 @@ const formatTime12Hour = (time24) => {
 }
 
 function EventsTab({ user, accessToken }) {
+  // Helper: Find conflicting event IDs (same date and time)
+  const getConflictingEventIds = () => {
+    const conflicts = new Set();
+    const seen = {};
+    events.forEach(event => {
+      if (!event.date || !event.startTime || !event.endTime) return;
+      const key = `${event.date}_${event.startTime}_${event.endTime}`;
+      if (seen[key]) {
+        conflicts.add(event.id);
+        conflicts.add(seen[key]);
+      } else {
+        seen[key] = event.id;
+      }
+    });
+    return conflicts;
+  };
+
   const [events, setEvents] = useState([])
   const [loading, setLoading] = useState(true)
   const [showForm, setShowForm] = useState(false)
@@ -583,7 +600,8 @@ function EventsTab({ user, accessToken }) {
 
   if (loading) return <div>Loading events...</div>
 
-  const visibleEventEntries = getVisibleEventEntries()
+  const visibleEventEntries = getVisibleEventEntries();
+  const conflictingIds = getConflictingEventIds();
 
   return (
     <div className="events-tab">
@@ -641,50 +659,58 @@ function EventsTab({ user, accessToken }) {
         {visibleEventEntries.length === 0 ? (
           <p>{showHiddenEvents ? 'No events to show.' : 'No visible events. Create one to get started.'}</p>
         ) : (
-          visibleEventEntries.map((entry) => (
-            <div key={entry.entryId} className="event-card" onClick={() => setSelectedEventDetails(entry.representative)} style={{ cursor: 'pointer' }}>
-              <div className="event-card-head">
-                <label className="event-select-checkbox" onClick={e => e.stopPropagation()}>
-                  <input
-                    type="checkbox"
-                    checked={selectedEventIds.includes(entry.entryId)}
-                    onChange={() => handleToggleSelectEvent(entry.entryId)}
-                  />
-                  Select
-                </label>
-                <h3>
-                  {entry.representative.title}{' '}
-                  {entry.status === 'booked' && <span style={{ color: '#27ae60', fontSize: '0.9rem' }}>(Booked)</span>}
-                  {entry.status === 'partial' && <span style={{ color: '#f39c12', fontSize: '0.9rem' }}>(Partially Booked)</span>}
-                  {entry.isSeries && <span style={{ color: '#667eea', fontSize: '0.9rem' }}>({entry.events.length} in series)</span>}
-                </h3>
+          visibleEventEntries.map((entry) => {
+            const isConflict = conflictingIds.has(entry.representative.id);
+            return (
+              <div key={entry.entryId} className="event-card" onClick={() => setSelectedEventDetails(entry.representative)} style={{ cursor: 'pointer' }}>
+                <div className="event-card-head">
+                  <label className="event-select-checkbox" onClick={e => e.stopPropagation()}>
+                    <input
+                      type="checkbox"
+                      checked={selectedEventIds.includes(entry.entryId)}
+                      onChange={() => handleToggleSelectEvent(entry.entryId)}
+                    />
+                    Select
+                  </label>
+                  <h3>
+                    {entry.representative.title}{' '}
+                    {isConflict && (
+                      <span title="Conflicting event" style={{ color: 'red', fontSize: '1.2em', marginRight: 8, verticalAlign: 'middle' }}>
+                        &#9888;
+                      </span>
+                    )}
+                    {entry.status === 'booked' && <span style={{ color: '#27ae60', fontSize: '0.9rem' }}>(Booked)</span>}
+                    {entry.status === 'partial' && <span style={{ color: '#f39c12', fontSize: '0.9rem' }}>(Partially Booked)</span>}
+                    {entry.isSeries && <span style={{ color: '#667eea', fontSize: '0.9rem' }}>({entry.events.length} in series)</span>}
+                  </h3>
+                </div>
+                <p>
+                  {entry.isSeries
+                    ? `${entry.firstOccurrence.date} → ${entry.lastOccurrence.date}`
+                    : `${entry.representative.date} ${formatTime12Hour(entry.representative.startTime)} - ${formatTime12Hour(entry.representative.endTime)}`}
+                </p>
+                <p>{entry.representative.description}</p>
+                <div className="event-actions" onClick={e => e.stopPropagation()}>
+                  <button onClick={() => handleEditEvent(entry.representative)}>Edit</button>
+                  <button
+                    onClick={async () => {
+                      for (const eventId of entry.eventIds) {
+                        await handleAdminApproveEvent(eventId, { silent: true })
+                      }
+                      alert(entry.isSeries ? 'Recurring series approved.' : 'Event approved directly by admin!')
+                    }}
+                    disabled={entry.status === 'booked'}
+                  >
+                    {entry.status === 'booked' ? 'Approved' : entry.isSeries ? 'Approve Series' : 'Admin Approve'}
+                  </button>
+                  <button onClick={() => handleGenerateLink(entry.representative.id)}>Generate Link</button>
+                  <button onClick={() => handleDeleteEventEntry(entry)}>
+                    {entry.isSeries ? 'Delete Series' : 'Delete'}
+                  </button>
+                </div>
               </div>
-              <p>
-                {entry.isSeries
-                  ? `${entry.firstOccurrence.date} → ${entry.lastOccurrence.date}`
-                  : `${entry.representative.date} ${formatTime12Hour(entry.representative.startTime)} - ${formatTime12Hour(entry.representative.endTime)}`}
-              </p>
-              <p>{entry.representative.description}</p>
-              <div className="event-actions" onClick={e => e.stopPropagation()}>
-                <button onClick={() => handleEditEvent(entry.representative)}>Edit</button>
-                <button
-                  onClick={async () => {
-                    for (const eventId of entry.eventIds) {
-                      await handleAdminApproveEvent(eventId, { silent: true })
-                    }
-                    alert(entry.isSeries ? 'Recurring series approved.' : 'Event approved directly by admin!')
-                  }}
-                  disabled={entry.status === 'booked'}
-                >
-                  {entry.status === 'booked' ? 'Approved' : entry.isSeries ? 'Approve Series' : 'Admin Approve'}
-                </button>
-                <button onClick={() => handleGenerateLink(entry.representative.id)}>Generate Link</button>
-                <button onClick={() => handleDeleteEventEntry(entry)}>
-                  {entry.isSeries ? 'Delete Series' : 'Delete'}
-                </button>
-              </div>
-            </div>
-          ))
+            );
+          })
         )}
       </div>
     </div>
