@@ -642,9 +642,171 @@ function EventsTab({ user, accessToken }) {
       )}
 
       {showForm && (
-        // ...existing code...
         <form className="event-form" onSubmit={editingEvent ? handleUpdateEvent : handleCreateEvent}>
-          {/* ...existing code... */}
+<input
+            type="text"
+            placeholder="Event Title"
+            value={formData.title}
+            onChange={(e) => setFormData({ ...formData, title: e.target.value })}
+            required
+          />
+          <input
+            type="date"
+            value={formData.date}
+            onChange={(e) => setFormData({ ...formData, date: e.target.value })}
+            required
+          />
+          <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
+            <label>Start Time:</label>
+            <select
+              value={formData.startHour}
+              onChange={(e) => setFormData({ ...formData, startHour: e.target.value })}
+              required
+            >
+              <option value="">Hour</option>
+              {[...Array(12)].map((_, i) => (
+                <option key={i + 1} value={i + 1}>{i + 1}</option>
+              ))}
+            </select>
+            <span>:</span>
+            <select
+              value={formData.startMinute}
+              onChange={(e) => setFormData({ ...formData, startMinute: e.target.value })}
+              required
+            >
+              <option value="">Min</option>
+              <option value="00">00</option>
+              <option value="15">15</option>
+              <option value="30">30</option>
+              <option value="45">45</option>
+            </select>
+            <select
+              value={formData.startPeriod}
+              onChange={(e) => setFormData({ ...formData, startPeriod: e.target.value })}
+              required
+            >
+              <option value="AM">AM</option>
+              <option value="PM">PM</option>
+            </select>
+          </div>
+          <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
+            <label>End Time:</label>
+            <select
+              value={formData.endHour}
+              onChange={(e) => setFormData({ ...formData, endHour: e.target.value })}
+              required
+            >
+              <option value="">Hour</option>
+              {[...Array(12)].map((_, i) => (
+                <option key={i + 1} value={i + 1}>{i + 1}</option>
+              ))}
+            </select>
+            <span>:</span>
+            <select
+              value={formData.endMinute}
+              onChange={(e) => setFormData({ ...formData, endMinute: e.target.value })}
+              required
+            >
+              <option value="">Min</option>
+              <option value="00">00</option>
+              <option value="15">15</option>
+              <option value="30">30</option>
+              <option value="45">45</option>
+            </select>
+            <select
+              value={formData.endPeriod}
+              onChange={(e) => setFormData({ ...formData, endPeriod: e.target.value })}
+              required
+            >
+              <option value="AM">AM</option>
+              <option value="PM">PM</option>
+            </select>
+          </div>
+          <textarea
+            placeholder="Description"
+            value={formData.description}
+            onChange={(e) => setFormData({ ...formData, description: e.target.value })}
+          />
+          <input
+            type="email"
+            placeholder="Band Email"
+            value={formData.bandEmail}
+            onChange={(e) => setFormData({ ...formData, bandEmail: e.target.value })}
+            required
+          />
+
+          <label className="recurrence-check">
+            <input
+              type="checkbox"
+              checked={formData.showOnWebsite}
+              onChange={(e) => setFormData({ ...formData, showOnWebsite: e.target.checked })}
+            />
+            Show this event on website upcoming shows
+          </label>
+
+          {!editingEvent && (
+            <div className="recurrence-box">
+              <label className="recurrence-check">
+                <input
+                  type="checkbox"
+                  checked={formData.isRecurring}
+                  onChange={(e) =>
+                    setFormData({
+                      ...formData,
+                      isRecurring: e.target.checked,
+                      recurrenceWeeks: formData.recurrenceWeeks || '1',
+                    })
+                  }
+                />
+                Recurring Event
+              </label>
+
+              {formData.isRecurring && (
+                <div className="recurrence-controls">
+                  <div className="recurrence-row">
+                    <label>Repeat based on:</label>
+                    <select
+                      value={formData.recurrenceMode}
+                      onChange={(e) => setFormData({ ...formData, recurrenceMode: e.target.value })}
+                    >
+                      <option value="weeks">Number of Weeks</option>
+                      <option value="day">Day (same weekday) until date</option>
+                    </select>
+                  </div>
+
+                  {formData.recurrenceMode === 'weeks' ? (
+                    <div className="recurrence-row">
+                      <label>Number of weeks:</label>
+                      <input
+                        type="number"
+                        min="1"
+                        max="52"
+                        value={formData.recurrenceWeeks}
+                        onChange={(e) => setFormData({ ...formData, recurrenceWeeks: e.target.value })}
+                        required={formData.isRecurring && formData.recurrenceMode === 'weeks'}
+                      />
+                    </div>
+                  ) : (
+                    <div className="recurrence-row">
+                      <label>End date:</label>
+                      <input
+                        type="date"
+                        value={formData.recurrenceEndDate}
+                        onChange={(e) => setFormData({ ...formData, recurrenceEndDate: e.target.value })}
+                        min={formData.date || undefined}
+                        required={formData.isRecurring && formData.recurrenceMode === 'day'}
+                      />
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          )}
+
+          <div style={{ display: 'flex', gap: '0.5rem' }}>
+            <button type="submit">{editingEvent ? 'Update Event' : 'Create Event'}</button>
+            {editingEvent && <button type="button" onClick={handleCancelEdit}>Cancel</button>}
+          </div>
         </form>
       )}
 
