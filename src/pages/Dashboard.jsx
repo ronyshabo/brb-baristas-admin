@@ -4,6 +4,8 @@ import StaffTab from '../components/StaffTab'
 import BookingsTab from '../components/BookingsTab'
 import CalendarTab from '../components/CalendarTab'
 import WebsiteContentTab from '../components/WebsiteContentTab'
+import CreateSubscriptionTab from '../components/CreateSubscriptionTab'
+import SubscriptionLookupAndManageTab from '../components/SubscriptionLookupAndManageTab'
 import '../styles/Dashboard.css'
 
 function Dashboard({ user, googleAccessToken }) {
@@ -15,6 +17,7 @@ function Dashboard({ user, googleAccessToken }) {
     { id: 'calendar', label: 'Calendar' },
     { id: 'staff', label: 'Staff Management' },
     { id: 'websiteContent', label: 'Website Content' },
+    { id: 'subscriptions', label: 'Subscriptions' },
   ]
 
   return (
@@ -38,6 +41,13 @@ function Dashboard({ user, googleAccessToken }) {
         {activeTab === 'calendar' && <CalendarTab accessToken={googleAccessToken} />}
         {activeTab === 'staff' && <StaffTab user={user} accessToken={googleAccessToken} />}
         {activeTab === 'websiteContent' && <WebsiteContentTab user={user} />}
+        {activeTab === 'subscriptions' && (
+          <div>
+            <CreateSubscriptionTab />
+            <hr style={{ margin: '32px 0' }} />
+            <SubscriptionLookupAndManageTab />
+          </div>
+        )}
       </div>
     </div>
   )
