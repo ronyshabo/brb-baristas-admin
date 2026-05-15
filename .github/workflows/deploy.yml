@@ -28,7 +28,7 @@ jobs:
           VITE_GOOGLE_CALENDAR_API_KEY: ${{ secrets.GOOGLE_CALENDAR_API_KEY || secrets.VITE_GOOGLE_CALENDAR_API_KEY }}
         run: |
           set -euo pipefail
-          EC2_SSH_PORT="${EC2_SSH_PORT:-22}"
+          EC2_SSH_PORT="${EC2_SSH_PORT:-2222}"
 
           required_vars=(
             EC2_HOST
@@ -61,10 +61,17 @@ jobs:
           mkdir -p ~/.ssh
           echo "$EC2_SSH_KEY" > ~/.ssh/id_rsa
           chmod 600 ~/.ssh/id_rsa
+
+          echo "Checking port $EC2_SSH_PORT reachability on $EC2_HOST..."
+          nc -zv -w 10 "$EC2_HOST" "$EC2_SSH_PORT" || {
+            echo "ERROR: Cannot reach $EC2_HOST on port $EC2_SSH_PORT. Check EC2 security group and EC2_SSH_PORT secret."
+            exit 1
+          }
+
           ssh-keyscan -p "$EC2_SSH_PORT" -H "$EC2_HOST" >> ~/.ssh/known_hosts
-          
-          # SSH into EC2 and pull latest code, rebuild with secrets, restart
-          ssh -p "$EC2_SSH_PORT" -i ~/.ssh/id_rsa "$EC2_USER@$EC2_HOST" << EOF
+
+          # SSH into EC2 and run deploy script via bash -s to bypass .bashrc interactive guards
+          ssh -T -p "$EC2_SSH_PORT" -i ~/.ssh/id_rsa "$EC2_USER@$EC2_HOST" bash -s << EOF
           set -euo pipefail
           cd ~/brb-baristas-admin
 
