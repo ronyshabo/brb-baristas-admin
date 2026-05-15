@@ -46,6 +46,59 @@ function DrinksTab() {
     imageUrl: '',
     published: true,
   })
+  const [editingId, setEditingId] = useState(null)
+  const [editFormData, setEditFormData] = useState({})
+
+  const handleStartEdit = (drink) => {
+    setEditingId(drink.id)
+    setEditFormData({
+      name: drink.name || '',
+      group: normalizeDrinkGroup(drink.group || drink.category || 'Coffee'),
+      price: drink.price || '',
+      description: drink.description || '',
+      imageUrl: drink.imageUrl || '',
+      published: drink.published ?? true,
+    })
+  }
+
+  const handleCancelEdit = () => {
+    setEditingId(null)
+    setEditFormData({})
+  }
+
+  const handleSaveEdit = async (drinkId) => {
+    if (!editFormData.name.trim() || !editFormData.price.trim()) {
+      alert('Drink name and price are required.')
+      return
+    }
+
+    try {
+      const normalizedGroup = normalizeDrinkGroup(editFormData.group)
+      const updates = {
+        name: editFormData.name.trim(),
+        group: normalizedGroup,
+        category: normalizedGroup,
+        price: editFormData.price.trim(),
+        description: editFormData.description.trim(),
+        imageUrl: editFormData.imageUrl.trim(),
+        published: Boolean(editFormData.published),
+        updatedAt: new Date(),
+      }
+
+      await updateDoc(doc(db, 'drinks', drinkId), updates)
+
+      setDrinks((previous) =>
+        previous
+          .map((entry) => (entry.id === drinkId ? { ...entry, ...updates } : entry))
+          .sort(sortByGroupThenName)
+      )
+      setEditingId(null)
+      setEditFormData({})
+    } catch (error) {
+      console.error('Error saving drink edits:', error)
+      alert('Failed to save changes')
+    }
+  }
 
   const loadDrinks = async () => {
     try {
@@ -217,25 +270,77 @@ function DrinksTab() {
             {drinksInGroup.length === 0 ? <p>No drinks in this section yet.</p> : null}
             {drinksInGroup.map((drink) => (
               <article key={drink.id} className="admin-content-card">
-                {drink.imageUrl ? (
-                  <img className="admin-poster-image" src={drink.imageUrl} alt={drink.name || 'Drink'} />
-                ) : null}
-                <div className="admin-content-card-top">
-                  <h3>{drink.name || 'Unnamed drink'}</h3>
-                  <span className={`status-pill ${(drink.published ?? true) ? 'live' : 'draft'}`}>
-                    {(drink.published ?? true) ? 'Visible' : 'Hidden'}
-                  </span>
-                </div>
-                <p className="admin-content-meta">{drink.group || drink.category || 'Ungrouped'} • {drink.price || 'No price'}</p>
-                <p>{drink.description || 'No description.'}</p>
-                <div className="admin-card-actions">
-                  <button type="button" onClick={() => handleTogglePublished(drink)}>
-                    {(drink.published ?? true) ? 'Hide' : 'Show'}
-                  </button>
-                  <button type="button" className="danger" onClick={() => handleDeleteDrink(drink.id)}>
-                    Delete
-                  </button>
-                </div>
+                {editingId === drink.id ? (
+                  <>
+                    <input
+                      type="text"
+                      placeholder="Drink name"
+                      value={editFormData.name}
+                      onChange={(e) => setEditFormData({ ...editFormData, name: e.target.value })}
+                    />
+                    <select
+                      value={editFormData.group}
+                      onChange={(e) => setEditFormData({ ...editFormData, group: e.target.value })}
+                    >
+                      {DRINK_GROUP_OPTIONS.map((g) => (
+                        <option key={g} value={g}>{g}</option>
+                      ))}
+                    </select>
+                    <input
+                      type="text"
+                      placeholder="Price (e.g. $5.50)"
+                      value={editFormData.price}
+                      onChange={(e) => setEditFormData({ ...editFormData, price: e.target.value })}
+                    />
+                    <input
+                      type="url"
+                      placeholder="Image URL (optional)"
+                      value={editFormData.imageUrl}
+                      onChange={(e) => setEditFormData({ ...editFormData, imageUrl: e.target.value })}
+                    />
+                    <textarea
+                      rows={3}
+                      placeholder="Description (optional)"
+                      value={editFormData.description}
+                      onChange={(e) => setEditFormData({ ...editFormData, description: e.target.value })}
+                    />
+                    <label className="admin-checkbox-row">
+                      <input
+                        type="checkbox"
+                        checked={editFormData.published}
+                        onChange={(e) => setEditFormData({ ...editFormData, published: e.target.checked })}
+                      />
+                      Show on website
+                    </label>
+                    <div className="admin-card-actions">
+                      <button type="button" onClick={() => handleSaveEdit(drink.id)}>Save</button>
+                      <button type="button" onClick={handleCancelEdit}>Cancel</button>
+                    </div>
+                  </>
+                ) : (
+                  <>
+                    {drink.imageUrl ? (
+                      <img className="admin-poster-image" src={drink.imageUrl} alt={drink.name || 'Drink'} />
+                    ) : null}
+                    <div className="admin-content-card-top">
+                      <h3>{drink.name || 'Unnamed drink'}</h3>
+                      <span className={`status-pill ${(drink.published ?? true) ? 'live' : 'draft'}`}>
+                        {(drink.published ?? true) ? 'Visible' : 'Hidden'}
+                      </span>
+                    </div>
+                    <p className="admin-content-meta">{drink.group || drink.category || 'Ungrouped'} • {drink.price || 'No price'}</p>
+                    <p>{drink.description || 'No description.'}</p>
+                    <div className="admin-card-actions">
+                      <button type="button" onClick={() => handleStartEdit(drink)}>Edit</button>
+                      <button type="button" onClick={() => handleTogglePublished(drink)}>
+                        {(drink.published ?? true) ? 'Hide' : 'Show'}
+                      </button>
+                      <button type="button" className="danger" onClick={() => handleDeleteDrink(drink.id)}>
+                        Delete
+                      </button>
+                    </div>
+                  </>
+                )}
               </article>
             ))}
           </div>
