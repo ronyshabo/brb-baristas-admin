@@ -521,11 +521,23 @@ function StaffTab({ user, accessToken }) {
     let unmatchedCount = 0
 
     transactions.forEach(tx => {
-      const workingBaristas = [...new Set(
+      // Primary match: transaction falls within an exact shift window
+      let workingBaristas = [...new Set(
         weekShifts
           .filter(shift => tx.date >= shift.start && tx.date <= shift.end)
           .map(shift => shift.barista)
       )]
+
+      // Fallback: if no exact shift match (e.g. transaction after closing time),
+      // assign to whoever worked on that calendar date so post-closing tips aren't lost
+      if (workingBaristas.length === 0) {
+        const txDateKey = formatDateKey(tx.date)
+        workingBaristas = [...new Set(
+          weekShifts
+            .filter(shift => formatDateKey(shift.start) === txDateKey)
+            .map(shift => shift.barista)
+        )]
+      }
 
       if (workingBaristas.length === 0) {
         unmatchedTips += tx.tip
