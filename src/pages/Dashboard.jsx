@@ -6,7 +6,7 @@ import CalendarTab from '../components/CalendarTab'
 import WebsiteContentTab from '../components/WebsiteContentTab'
 import '../styles/Dashboard.css'
 
-function Dashboard({ user, googleAccessToken }) {
+function Dashboard({ user, googleAccessToken, setGoogleAccessToken }) {
   const [activeTab, setActiveTab] = useState('events')
 
   const dashboardTabs = [
@@ -36,7 +36,13 @@ function Dashboard({ user, googleAccessToken }) {
         {activeTab === 'events' && <EventsTab user={user} accessToken={googleAccessToken} />}
         {activeTab === 'bookings' && <BookingsTab accessToken={googleAccessToken} />}
         {activeTab === 'calendar' && <CalendarTab accessToken={googleAccessToken} />}
-        {activeTab === 'staff' && <StaffTab user={user} accessToken={googleAccessToken} />}
+        {activeTab === 'staff' && (
+          <StaffTab
+            user={user}
+            accessToken={googleAccessToken}
+            setAccessToken={setGoogleAccessToken}
+          />
+        )}
         {activeTab === 'websiteContent' && <WebsiteContentTab user={user} />}
       </div>
     </div>

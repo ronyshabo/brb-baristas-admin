@@ -1,6 +1,7 @@
 import { useState } from 'react'
-import { signInWithEmailAndPassword, signInWithPopup, GoogleAuthProvider } from 'firebase/auth'
+import { signInWithEmailAndPassword } from 'firebase/auth'
 import { auth } from '../firebase/config'
+import { signInWithGoogleCalendar } from '../firebase/googleAuth'
 import '../styles/Login.css'
 
 function Login({ setUser, setGoogleToken }) {
@@ -30,16 +31,9 @@ function Login({ setUser, setGoogleToken }) {
     setError(null)
 
     try {
-      const provider = new GoogleAuthProvider()
-      provider.addScope('https://www.googleapis.com/auth/calendar')
-      const result = await signInWithPopup(auth, provider)
-      const credential = GoogleAuthProvider.credentialFromResult(result)
-      const accessToken = credential?.accessToken || null
-      if (accessToken) {
-        setGoogleToken(accessToken)
-        localStorage.setItem('brb_google_access_token', accessToken)
-      }
-      setUser(result.user)
+      const { user, accessToken } = await signInWithGoogleCalendar()
+      if (accessToken) setGoogleToken(accessToken)
+      setUser(user)
     } catch (err) {
       setError(err.message)
     } finally {

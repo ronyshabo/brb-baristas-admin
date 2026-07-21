@@ -1,9 +1,10 @@
 import { useState, useEffect } from 'react'
 import { collection, addDoc, getDocs, query, orderBy, doc, updateDoc, deleteDoc, setDoc } from 'firebase/firestore'
 import { db } from '../firebase/config'
+import { signInWithGoogleCalendar, clearGoogleToken } from '../firebase/googleAuth'
 import '../styles/StaffTab.css'
 
-function StaffTab({ user, accessToken }) {
+function StaffTab({ user, accessToken, setAccessToken }) {
   const [view, setView] = useState('calculator') // calculator, reports, baristas
   const [baristas, setBaristas] = useState([])
   const [selectedWeek, setSelectedWeek] = useState('')
@@ -22,6 +23,7 @@ function StaffTab({ user, accessToken }) {
   const [weekShifts, setWeekShifts] = useState([])
   const [reportText, setReportText] = useState('')
   const [copiedReport, setCopiedReport] = useState(false)
+  const [connectingGoogle, setConnectingGoogle] = useState(false)
 
   const calendarId = import.meta.env.VITE_GOOGLE_CALENDAR_ID
 
@@ -198,6 +200,28 @@ function StaffTab({ user, accessToken }) {
     }
   }
 
+  // Popups are blocked unless this runs from a click, so the tab shows a
+  // "Connect Google Calendar" button rather than prompting on its own.
+  const connectGoogleCalendar = async () => {
+    setConnectingGoogle(true)
+    try {
+      const { accessToken: freshToken } = await signInWithGoogleCalendar()
+      if (!freshToken) throw new Error('Google did not return calendar access')
+      setAccessToken(freshToken)
+    } catch (err) {
+      console.error('Google calendar connect failed:', err)
+      alert('Could not connect Google Calendar: ' + err.message)
+    } finally {
+      setConnectingGoogle(false)
+    }
+  }
+
+  // A token can expire mid-session; drop it so the connect prompt comes back.
+  const handleExpiredToken = () => {
+    clearGoogleToken()
+    setAccessToken(null)
+  }
+
   const fetchWeekSchedule = async () => {
     if (!selectedWeek || !accessToken) {
       alert('Please select a week and ensure you are logged in with Google')
@@ -219,6 +243,10 @@ function StaffTab({ user, accessToken }) {
       })
 
       const data = await response.json()
+      if (response.status === 401 || response.status === 403) {
+        handleExpiredToken()
+        throw new Error('Google Calendar access expired. Please reconnect above and try again.')
+      }
       if (!response.ok) throw new Error('Failed to fetch calendar events')
 
       // Process schedule by day
@@ -767,6 +795,18 @@ function StaffTab({ user, accessToken }) {
           </button>
         </div>
       </div>
+
+      {!accessToken && (
+        <div className="google-connect-banner">
+          <p>
+            Tip reports read the shift schedule from Google Calendar. Your calendar access
+            has expired or was never granted on this device.
+          </p>
+          <button onClick={connectGoogleCalendar} disabled={connectingGoogle}>
+            {connectingGoogle ? 'Connecting...' : 'Connect Google Calendar'}
+          </button>
+        </div>
+      )}
 
       {view === 'calculator' && (
         <div className="calculator-section">
