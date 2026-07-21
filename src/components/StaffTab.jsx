@@ -20,6 +20,8 @@ function StaffTab({ user, accessToken }) {
   const [hasAutoSyncedMonth, setHasAutoSyncedMonth] = useState(false)
   const [squareData, setSquareData] = useState('')
   const [weekShifts, setWeekShifts] = useState([])
+  const [reportText, setReportText] = useState('')
+  const [copiedReport, setCopiedReport] = useState(false)
 
   const calendarId = import.meta.env.VITE_GOOGLE_CALENDAR_ID
 
@@ -655,6 +657,77 @@ function StaffTab({ user, accessToken }) {
     })
   }
 
+  // Mirrors the Calculation Results table above, using WhatsApp *bold* markup
+  const formatReportMessage = () => {
+    const lines = []
+    lines.push('*BRB Tip Report*')
+    lines.push(`*Week:* ${calculation.weekStart} to ${calculation.weekEnd}`)
+    lines.push(`*Total Tips:* $${calculation.totalTips.toFixed(2)}`)
+
+    if (calculation.isByHour) {
+      lines.push(`*Matched Transactions:* ${calculation.matchedTransactions} of ${calculation.totalTransactions}`)
+      if (calculation.unmatchedTips > 0) {
+        lines.push(`*Unmatched Tips:* $${calculation.unmatchedTips.toFixed(2)} (${calculation.unmatchedCount} transactions outside any shift)`)
+      }
+    }
+
+    Object.entries(calculation.earnings).forEach(([name, data]) => {
+      lines.push('')
+      lines.push(`*${name}*`)
+      lines.push(`Shifts: ${data.shifts}  |  Hours: ${data.hours.toFixed(1)}`)
+      lines.push(`Base Pay: $${data.basePay.toFixed(2)}`)
+      lines.push(`Tips: $${data.tips.toFixed(2)}${calculation.isByHour ? `  (${data.transactions || 0} txns)` : ''}`)
+      lines.push(`Total: *$${(data.total || data.tips).toFixed(2)}*`)
+    })
+
+    return lines.join('\n')
+  }
+
+  const shareToWhatsApp = async () => {
+    if (!calculation) {
+      alert('Calculate tips first')
+      return
+    }
+
+    const message = formatReportMessage()
+
+    // navigator.share opens the native sheet (pick the group directly) on mobile.
+    // Requires HTTPS; falls back to the wa.me contact picker elsewhere.
+    if (navigator.share) {
+      try {
+        await navigator.share({ text: message })
+        return
+      } catch (err) {
+        if (err.name === 'AbortError') return // user dismissed the sheet
+        console.error('Share failed, falling back to wa.me:', err)
+      }
+    }
+
+    window.open(`https://wa.me/?text=${encodeURIComponent(message)}`, '_blank', 'noopener')
+  }
+
+  // Works on devices with no WhatsApp app and no WhatsApp Web session:
+  // copy the report, paste it into WhatsApp wherever you actually have it.
+  const copyReport = async () => {
+    if (!calculation) {
+      alert('Calculate tips first')
+      return
+    }
+
+    const message = formatReportMessage()
+    setReportText(message) // always show it, so there is a visible fallback to select manually
+
+    // navigator.clipboard needs HTTPS (or localhost); on plain HTTP this throws
+    try {
+      await navigator.clipboard.writeText(message)
+      setCopiedReport(true)
+      setTimeout(() => setCopiedReport(false), 2000)
+    } catch (err) {
+      console.error('Clipboard write failed, showing text to copy manually:', err)
+      setCopiedReport(false)
+    }
+  }
+
   const saveReport = async () => {
     if (!calculation) {
       alert('Calculate tips first')
@@ -831,6 +904,22 @@ function StaffTab({ user, accessToken }) {
                   </table>
 
                   <button onClick={saveReport} className="save-report-btn">Save Report to Firebase</button>
+                  <button onClick={shareToWhatsApp} className="whatsapp-share-btn">Send to WhatsApp</button>
+                  <button onClick={copyReport} className="copy-report-btn">
+                    {copiedReport ? 'Copied!' : 'Copy Report Text'}
+                  </button>
+
+                  {reportText && (
+                    <div className="report-text-block">
+                      <p>Paste this into the WhatsApp group:</p>
+                      <textarea
+                        readOnly
+                        value={reportText}
+                        rows={Math.min(20, reportText.split('\n').length)}
+                        onFocus={(e) => e.target.select()}
+                      />
+                    </div>
+                  )}
                 </div>
               )}
             </>

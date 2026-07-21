@@ -335,6 +335,61 @@
   background: #8e44ad;
 }
 
+.whatsapp-share-btn {
+  width: 100%;
+  padding: 1rem;
+  background: #25d366;
+  color: white;
+  border: none;
+  border-radius: 8px;
+  font-size: 1.1rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.3s;
+  margin-top: 0.75rem;
+}
+
+.whatsapp-share-btn:hover {
+  background: #1da851;
+}
+
+.copy-report-btn {
+  width: 100%;
+  padding: 1rem;
+  background: #34495e;
+  color: white;
+  border: none;
+  border-radius: 8px;
+  font-size: 1.1rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.3s;
+  margin-top: 0.75rem;
+}
+
+.copy-report-btn:hover {
+  background: #2c3e50;
+}
+
+.report-text-block {
+  margin-top: 1rem;
+}
+
+.report-text-block p {
+  margin-bottom: 0.5rem;
+  font-weight: 600;
+}
+
+.report-text-block textarea {
+  width: 100%;
+  padding: 0.75rem;
+  border: 2px solid #27ae60;
+  border-radius: 8px;
+  font-family: monospace;
+  font-size: 0.9rem;
+  resize: vertical;
+}
+
 /* Baristas Section */
 .baristas-section {
   background: white;
