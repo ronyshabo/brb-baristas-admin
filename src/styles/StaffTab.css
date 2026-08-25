@@ -663,6 +663,27 @@
   margin: 0.5rem 0;
 }
 
+.report-card-flagged {
+  border-left-color: #e67e22;
+  background: #fdf3e3;
+}
+
+.report-flag {
+  background: white;
+  border: 1px solid #e67e22;
+  border-radius: 6px;
+  padding: 0.75rem;
+  color: #7d4a11 !important;
+  font-size: 0.9rem;
+  line-height: 1.45;
+}
+
+.report-flag strong {
+  display: block;
+  color: #d35400;
+  margin-bottom: 0.25rem;
+}
+
 .report-card button {
   margin-top: 1rem;
   margin-right: 0.5rem;
@@ -677,6 +698,221 @@
 
 .report-card button:hover {
   background: #2980b9;
+}
+
+/* Year-End Tax Summary */
+.tax-panel {
+  background: #f4f0fa;
+  border: 2px solid #9b59b6;
+  border-radius: 12px;
+  padding: 1.5rem;
+  margin-bottom: 2rem;
+}
+
+.tax-panel h3 {
+  color: #8e44ad;
+  margin-bottom: 0.5rem;
+}
+
+.tax-panel h4 {
+  color: #2c3e50;
+  margin: 1.5rem 0 0.75rem;
+}
+
+.tax-panel-description {
+  color: #5d4a6d;
+  margin-bottom: 1.25rem;
+  line-height: 1.5;
+}
+
+.tax-controls {
+  display: flex;
+  gap: 1rem;
+  align-items: flex-end;
+  flex-wrap: wrap;
+}
+
+.tax-controls label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  font-weight: 600;
+  color: #34495e;
+  font-size: 0.9rem;
+}
+
+.tax-controls select {
+  padding: 0.75rem;
+  border: 2px solid #ddd;
+  border-radius: 8px;
+  font-size: 1rem;
+  background: white;
+}
+
+.tax-generate-btn {
+  padding: 0.75rem 1.5rem;
+  background: #9b59b6;
+  color: white;
+  border: none;
+  border-radius: 8px;
+  font-size: 1rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.3s;
+}
+
+.tax-generate-btn:hover {
+  background: #8e44ad;
+}
+
+.tax-clear-btn {
+  padding: 0.75rem 1.25rem;
+  background: #95a5a6;
+  color: white;
+  border: none;
+  border-radius: 8px;
+  font-size: 1rem;
+  cursor: pointer;
+  transition: background 0.3s;
+}
+
+.tax-clear-btn:hover {
+  background: #7f8c8d;
+}
+
+.tax-results {
+  margin-top: 1.5rem;
+}
+
+.tax-stat-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 1rem;
+  margin-bottom: 1.5rem;
+}
+
+.tax-stat {
+  background: white;
+  border-radius: 8px;
+  padding: 1rem;
+  border-left: 4px solid #9b59b6;
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.tax-stat span {
+  color: #7f8c8d;
+  font-size: 0.85rem;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.tax-stat strong {
+  color: #2c3e50;
+  font-size: 1.6rem;
+}
+
+.tax-stat small {
+  color: #95a5a6;
+  font-size: 0.8rem;
+}
+
+.tax-stat-highlight {
+  border-left-color: #27ae60;
+  background: #ecf8f3;
+}
+
+.tax-stat-highlight strong {
+  color: #27ae60;
+}
+
+.tax-table-scroll {
+  overflow-x: auto;
+}
+
+.tax-table thead {
+  background: #9b59b6;
+}
+
+.tax-table td:last-child {
+  color: #34495e;
+  font-size: 1rem;
+}
+
+.tax-table tfoot {
+  background: #f8f9fa;
+  font-weight: 600;
+}
+
+.tax-table tfoot td {
+  border-top: 2px solid #9b59b6;
+  color: #2c3e50;
+}
+
+.tax-flag-yes {
+  background: #fdecea;
+  color: #c0392b;
+  padding: 0.25rem 0.6rem;
+  border-radius: 999px;
+  font-size: 0.8rem;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.tax-flag-no {
+  background: #ecf0f1;
+  color: #7f8c8d;
+  padding: 0.25rem 0.6rem;
+  border-radius: 999px;
+  font-size: 0.8rem;
+  white-space: nowrap;
+}
+
+.tax-statement-btn {
+  padding: 0.4rem 0.85rem;
+  background: #3498db;
+  color: white;
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 0.85rem;
+  transition: background 0.3s;
+}
+
+.tax-statement-btn:hover {
+  background: #2980b9;
+}
+
+.tax-export-buttons {
+  display: flex;
+  gap: 1rem;
+  flex-wrap: wrap;
+  margin-top: 1.5rem;
+}
+
+.tax-export-buttons button {
+  padding: 0.75rem 1.5rem;
+  background: #27ae60;
+  color: white;
+  border: none;
+  border-radius: 8px;
+  font-size: 1rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.3s;
+}
+
+.tax-export-buttons button:hover {
+  background: #229954;
+}
+
+.tax-disclaimer {
+  margin-top: 1.5rem;
+  color: #7f8c8d;
+  font-size: 0.9rem;
+  line-height: 1.5;
+  font-style: italic;
 }
 
 @media (max-width: 768px) {
@@ -704,5 +940,14 @@
   .earnings-table th,
   .earnings-table td {
     padding: 0.5rem;
+  }
+
+  .tax-controls {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .tax-export-buttons {
+    flex-direction: column;
   }
 }

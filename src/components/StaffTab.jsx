@@ -4,11 +4,21 @@ import { db } from '../firebase/config'
 import { signInWithGoogleCalendar, clearGoogleToken } from '../firebase/googleAuth'
 import '../styles/StaffTab.css'
 
+// A person paid $600+ in a calendar year needs a 1099-NEC (non-employee comp).
+const TAX_1099_THRESHOLD = 600
+
+// Shift windows as scheduled on the calendar, in hours.
+const MORNING_HOURS = 6         // 8am - 2pm
+const EVENING_HOURS = 7         // 2pm - 9pm
+const INTER_SHIFT_HOURS = 6     // 12pm - 6pm
+const INTER_MORNING_OVERLAP = 2 // the 12pm - 2pm part of an inter-shift
+const INTER_EVENING_OVERLAP = 4 // the 2pm - 6pm part of an inter-shift
+
 function StaffTab({ user, accessToken, setAccessToken }) {
   const [view, setView] = useState('calculator') // calculator, reports, baristas
   const [baristas, setBaristas] = useState([])
   const [selectedWeek, setSelectedWeek] = useState('')
-  const [tipInputMethod, setTipInputMethod] = useState('manual') // manual, bulk
+  const [tipInputMethod, setTipInputMethod] = useState('byHour') // byHour, bulk, manual
   const [bulkTipData, setBulkTipData] = useState('')
   const [dailyTips, setDailyTips] = useState({})
   const [weekSchedule, setWeekSchedule] = useState(null)
@@ -24,6 +34,10 @@ function StaffTab({ user, accessToken, setAccessToken }) {
   const [reportText, setReportText] = useState('')
   const [copiedReport, setCopiedReport] = useState(false)
   const [connectingGoogle, setConnectingGoogle] = useState(false)
+  const [taxYear, setTaxYear] = useState(String(new Date().getFullYear()))
+  const [taxBasis, setTaxBasis] = useState('weekStart')
+  const [taxSummary, setTaxSummary] = useState(null)
+  const [taxStatementText, setTaxStatementText] = useState('')
 
   const calendarId = import.meta.env.VITE_GOOGLE_CALENDAR_ID
 
@@ -551,36 +565,43 @@ function StaffTab({ user, accessToken, setAccessToken }) {
     let unmatchedCount = 0
 
     transactions.forEach(tx => {
-      // Primary match: transaction falls within an exact shift window
-      let workingBaristas = [...new Set(
+      // Primary match: transaction falls within an exact shift window, so everyone
+      // on the floor at that moment splits it evenly.
+      const onShiftNow = [...new Set(
         weekShifts
           .filter(shift => tx.date >= shift.start && tx.date <= shift.end)
           .map(shift => shift.barista)
       )]
 
-      // Fallback: if no exact shift match (e.g. transaction after closing time),
-      // assign to whoever worked on that calendar date so post-closing tips aren't lost
-      if (workingBaristas.length === 0) {
+      const weights = {}
+      onShiftNow.forEach(name => { weights[name] = 1 })
+
+      // Fallback for a transaction outside every shift window (e.g. after closing):
+      // spread it over that day's crew in proportion to the hours each one worked,
+      // so a two-hour inter-shift doesn't take the same cut as a full shift.
+      if (onShiftNow.length === 0) {
         const txDateKey = formatDateKey(tx.date)
-        workingBaristas = [...new Set(
-          weekShifts
-            .filter(shift => formatDateKey(shift.start) === txDateKey)
-            .map(shift => shift.barista)
-        )]
+        weekShifts
+          .filter(shift => formatDateKey(shift.start) === txDateKey)
+          .forEach(shift => {
+            const shiftHours = (shift.end - shift.start) / (1000 * 60 * 60)
+            weights[shift.barista] = (weights[shift.barista] || 0) + shiftHours
+          })
       }
 
-      if (workingBaristas.length === 0) {
+      const weightTotal = Object.values(weights).reduce((sum, weight) => sum + weight, 0)
+      if (weightTotal <= 0) {
         unmatchedTips += tx.tip
         unmatchedCount++
         return
       }
 
-      const share = tx.tip / workingBaristas.length
-      workingBaristas.forEach(name => {
+      // Shares are fractions of one transaction, so they always sum back to tx.tip
+      Object.entries(weights).forEach(([name, weight]) => {
         if (!baristaEarnings[name]) {
           baristaEarnings[name] = { tips: 0, hours: 0, shifts: 0, basePay: 0, total: 0, transactions: 0 }
         }
-        baristaEarnings[name].tips += share
+        baristaEarnings[name].tips += tx.tip * (weight / weightTotal)
         baristaEarnings[name].transactions++
       })
     })
@@ -588,8 +609,9 @@ function StaffTab({ user, accessToken, setAccessToken }) {
     // Calculate hours and shifts from calendar data
     Object.keys(baristaEarnings).forEach(name => {
       const shifts = weekShifts.filter(s => s.barista === name)
-      const uniqueDays = new Set(shifts.map(s => formatDateKey(s.start)))
-      baristaEarnings[name].shifts = uniqueDays.size
+      // Every scheduled shift earns a base rate, so working a double in one day
+      // counts twice - the same rule the daily-totals path applies.
+      baristaEarnings[name].shifts = shifts.length
       baristaEarnings[name].hours = shifts.reduce((sum, s) => {
         return sum + (s.end - s.start) / (1000 * 60 * 60)
       }, 0)
@@ -599,8 +621,10 @@ function StaffTab({ user, accessToken, setAccessToken }) {
     })
 
     const totalTips = transactions.reduce((sum, tx) => sum + tx.tip, 0)
+    const tipsDistributed = Object.values(baristaEarnings).reduce((sum, data) => sum + data.tips, 0)
 
     setCalculation({
+      tipsDistributed,
       weekStart: selectedWeek || formatDateKey(transactions[0].date),
       weekEnd: selectedWeek
         ? formatDateKey(new Date(parseDateInput(selectedWeek).getTime() + 6 * 24 * 60 * 60 * 1000))
@@ -617,6 +641,54 @@ function StaffTab({ user, accessToken, setAccessToken }) {
     alert(`Parsed ${transactions.length} transactions with tips. ${unmatchedCount > 0 ? `${unmatchedCount} transactions ($${unmatchedTips.toFixed(2)}) could not be matched to any barista shift.` : 'All matched to shifts.'}`)
   }
 
+  // Splits one day's tips into a morning pool and an evening pool, each divided by
+  // the hours a barista actually covered in that window. Weights are normalized
+  // inside the pool, so a day's shares always add up to exactly that day's tips:
+  // an inter-shift barista dilutes the other shares instead of being paid on top of
+  // an already-full split (which is what used to push payouts over 100%).
+  const allocateDayTips = (daySchedule, dayTip) => {
+    const morningWeights = {}
+    const eveningWeights = {}
+    const addWeight = (weights, name, hours) => {
+      weights[name] = (weights[name] || 0) + hours
+    }
+
+    daySchedule.morning.forEach(name => addWeight(morningWeights, name, MORNING_HOURS))
+    daySchedule.evening.forEach(name => addWeight(eveningWeights, name, EVENING_HOURS))
+    daySchedule.interShift.forEach(name => {
+      addWeight(morningWeights, name, INTER_MORNING_OVERLAP)
+      addWeight(eveningWeights, name, INTER_EVENING_OVERLAP)
+    })
+
+    const sumWeights = (weights) => Object.values(weights).reduce((sum, weight) => sum + weight, 0)
+    const morningWeightTotal = sumWeights(morningWeights)
+    const eveningWeightTotal = sumWeights(eveningWeights)
+
+    // Half the day's tips per pool, except an unstaffed half hands its share to the
+    // other one rather than dropping it.
+    let morningPool = dayTip / 2
+    let eveningPool = dayTip / 2
+    if (morningWeightTotal === 0) {
+      eveningPool += morningPool
+      morningPool = 0
+    }
+    if (eveningWeightTotal === 0) {
+      morningPool += eveningPool
+      eveningPool = 0
+    }
+
+    const shares = {}
+    Object.entries(morningWeights).forEach(([name, weight]) => {
+      shares[name] = (shares[name] || 0) + morningPool * (weight / morningWeightTotal)
+    })
+    Object.entries(eveningWeights).forEach(([name, weight]) => {
+      shares[name] = (shares[name] || 0) + eveningPool * (weight / eveningWeightTotal)
+    })
+
+    const allocated = Object.values(shares).reduce((sum, share) => sum + share, 0)
+    return { shares, unallocated: dayTip - allocated }
+  }
+
   const calculateTips = () => {
     if (!weekSchedule || Object.keys(dailyTips).length === 0) {
       alert('Please load schedule and enter tip data first')
@@ -624,64 +696,71 @@ function StaffTab({ user, accessToken, setAccessToken }) {
     }
 
     const baristaEarnings = {}
+    const earningsFor = (name) => {
+      if (!baristaEarnings[name]) {
+        baristaEarnings[name] = { tips: 0, hours: 0, shifts: 0, basePay: 0, total: 0 }
+      }
+      return baristaEarnings[name]
+    }
+
+    let scheduledTips = 0
+    let unallocatedTips = 0
+    let unallocatedDays = 0
 
     Object.keys(weekSchedule).forEach(date => {
       const daySchedule = weekSchedule[date]
       const dayTip = dailyTips[date] || 0
-      
-      // Split tips between morning and evening (50/50 if both shifts worked)
-      const morningTip = dayTip / 2
-      const eveningTip = dayTip / 2
+      scheduledTips += dayTip
 
-      // Morning shift (8am-2pm)
-      const morningCount = daySchedule.morning.length
-      if (morningCount > 0) {
-        const morningShare = morningTip / morningCount
-        daySchedule.morning.forEach(barista => {
-          if (!baristaEarnings[barista]) baristaEarnings[barista] = { tips: 0, hours: 0, shifts: 0, basePay: 0 }
-          baristaEarnings[barista].tips += morningShare
-          baristaEarnings[barista].hours += 6 // 8am-2pm = 6 hours
-          baristaEarnings[barista].shifts += 1
-        })
+      const { shares, unallocated } = allocateDayTips(daySchedule, dayTip)
+      Object.entries(shares).forEach(([name, share]) => {
+        earningsFor(name).tips += share
+      })
+      if (unallocated > 0.005) {
+        unallocatedTips += unallocated
+        unallocatedDays += 1
       }
 
-      // Evening shift (2pm-9pm)
-      const eveningCount = daySchedule.evening.length
-      if (eveningCount > 0) {
-        const eveningShare = eveningTip / eveningCount
-        daySchedule.evening.forEach(barista => {
-          if (!baristaEarnings[barista]) baristaEarnings[barista] = { tips: 0, hours: 0, shifts: 0, basePay: 0 }
-          baristaEarnings[barista].tips += eveningShare
-          baristaEarnings[barista].hours += 7 // 2pm-9pm = 7 hours
-          baristaEarnings[barista].shifts += 1
-        })
-      }
-
-      // Inter-shift gets a portion based on overlap (12pm-6pm = 4 hours overlap with both)
-      daySchedule.interShift.forEach(barista => {
-        if (!baristaEarnings[barista]) baristaEarnings[barista] = { tips: 0, hours: 0, shifts: 0, basePay: 0 }
-        // Inter-shift overlaps 2 hours with morning, 4 hours with evening
-        const interShare = (morningTip * (2/6)) + (eveningTip * (4/7))
-        baristaEarnings[barista].tips += interShare / daySchedule.interShift.length
-        baristaEarnings[barista].hours += 6 // 12pm-6pm = 6 hours
-        baristaEarnings[barista].shifts += 1
+      // Hours and shifts are counted off the schedule, independent of the tip split
+      daySchedule.morning.forEach(name => {
+        earningsFor(name).hours += MORNING_HOURS
+        earningsFor(name).shifts += 1
+      })
+      daySchedule.evening.forEach(name => {
+        earningsFor(name).hours += EVENING_HOURS
+        earningsFor(name).shifts += 1
+      })
+      daySchedule.interShift.forEach(name => {
+        earningsFor(name).hours += INTER_SHIFT_HOURS
+        earningsFor(name).shifts += 1
       })
     })
 
-    // Add base pay from barista records (flat rate per shift, not hourly)
+    // Tips parsed for a date outside the loaded week can never reach a barista.
+    // Count them as undistributed instead of letting them inflate the week total.
+    const outsideWeekEntries = Object.entries(dailyTips)
+      .filter(([date, tip]) => !weekSchedule[date] && (Number(tip) || 0) > 0)
+    const outsideWeekTips = outsideWeekEntries.reduce((sum, [, tip]) => sum + (Number(tip) || 0), 0)
+
     baristas.forEach(barista => {
       if (baristaEarnings[barista.name]) {
         baristaEarnings[barista.name].basePay = (barista.basePay || 0) * baristaEarnings[barista.name].shifts
-        baristaEarnings[barista.name].total = 
-          baristaEarnings[barista.name].tips + baristaEarnings[barista.name].basePay
       }
     })
+    Object.values(baristaEarnings).forEach(data => {
+      data.total = data.tips + data.basePay
+    })
+
+    const tipsDistributed = Object.values(baristaEarnings).reduce((sum, data) => sum + data.tips, 0)
 
     setCalculation({
       weekStart: selectedWeek,
       weekEnd: formatDateKey(new Date(parseDateInput(selectedWeek).getTime() + 6 * 24 * 60 * 60 * 1000)),
       earnings: baristaEarnings,
-      totalTips: Object.values(dailyTips).reduce((sum, tip) => sum + tip, 0)
+      totalTips: scheduledTips + outsideWeekTips,
+      tipsDistributed,
+      unmatchedTips: unallocatedTips + outsideWeekTips,
+      unmatchedCount: unallocatedDays + outsideWeekEntries.length
     })
   }
 
@@ -694,9 +773,10 @@ function StaffTab({ user, accessToken, setAccessToken }) {
 
     if (calculation.isByHour) {
       lines.push(`*Matched Transactions:* ${calculation.matchedTransactions} of ${calculation.totalTransactions}`)
-      if (calculation.unmatchedTips > 0) {
-        lines.push(`*Unmatched Tips:* $${calculation.unmatchedTips.toFixed(2)} (${calculation.unmatchedCount} transactions outside any shift)`)
-      }
+    }
+    if (calculation.unmatchedTips > 0.005) {
+      const reason = calculation.isByHour ? 'transactions outside any shift' : 'days with tips but nobody scheduled'
+      lines.push(`*Undistributed Tips:* $${calculation.unmatchedTips.toFixed(2)} (${calculation.unmatchedCount} ${reason})`)
     }
 
     Object.entries(calculation.earnings).forEach(([name, data]) => {
@@ -779,6 +859,286 @@ function StaffTab({ user, accessToken, setAccessToken }) {
     }
   }
 
+  const money = (value) => `$${(Number(value) || 0).toFixed(2)}`
+
+  // A saved report is out of balance when the tips paid to baristas don't match what
+  // the register recorded. Reports written before the tip split was fixed can be over
+  // or under 100%; anything flagged here should be re-pasted and saved again.
+  const getReportBalance = (report) => {
+    const collected = Number(report.totalTips) || 0
+    const distributed = report.tipsDistributed != null
+      ? Number(report.tipsDistributed)
+      : Object.values(report.earnings || {}).reduce((sum, data) => sum + (Number(data.tips) || 0), 0)
+    // Tips nobody could be paid (no one on the clock) are a known, intentional gap,
+    // not an allocation error, so they don't count against the balance.
+    const expectedGap = Number(report.unmatchedTips) || 0
+    const difference = distributed - collected
+
+    return {
+      collected,
+      distributed,
+      difference,
+      needsRecalculation: Math.abs(difference + expectedGap) > 0.01
+    }
+  }
+
+  const flaggedReports = reports.filter(report => getReportBalance(report).needsRecalculation)
+
+  // Reports cover a Sunday-to-Saturday week, so a week can straddle Dec 31.
+  // The chosen basis decides which calendar year/quarter that week is taxed in.
+  const getPeriodKey = (report, basis) =>
+    (basis === 'weekEnd' ? report.weekEnd || report.weekStart : report.weekStart || report.weekEnd) || ''
+
+  const availableTaxYears = [...new Set(
+    reports.map(report => getPeriodKey(report, taxBasis).slice(0, 4)).filter(Boolean)
+  )].sort().reverse()
+
+  const generateTaxSummary = () => {
+    const year = String(taxYear)
+    const yearReports = reports
+      .filter(report => getPeriodKey(report, taxBasis).slice(0, 4) === year)
+      .sort((a, b) => getPeriodKey(a, taxBasis).localeCompare(getPeriodKey(b, taxBasis)))
+
+    if (yearReports.length === 0) {
+      setTaxSummary(null)
+      setTaxStatementText('')
+      alert(`No saved tip reports found for ${year}.`)
+      return
+    }
+
+    const people = {}
+    const detail = []
+    let tipsCollected = 0
+    let unmatchedTips = 0
+
+    yearReports.forEach(report => {
+      const periodKey = getPeriodKey(report, taxBasis)
+      const monthIndex = Number(periodKey.slice(5, 7)) - 1
+      const quarterIndex = Math.floor(monthIndex / 3)
+
+      tipsCollected += Number(report.totalTips) || 0
+      unmatchedTips += Number(report.unmatchedTips) || 0
+
+      Object.entries(report.earnings || {}).forEach(([name, data]) => {
+        const tips = Number(data.tips) || 0
+        const basePay = Number(data.basePay) || 0
+        const total = data.total != null ? Number(data.total) : tips + basePay
+        const hours = Number(data.hours) || 0
+        const shifts = Number(data.shifts) || 0
+
+        if (!people[name]) {
+          people[name] = {
+            name,
+            shifts: 0,
+            hours: 0,
+            basePay: 0,
+            tips: 0,
+            total: 0,
+            weeks: 0,
+            transactions: 0,
+            firstWeek: report.weekStart || periodKey,
+            lastWeek: report.weekStart || periodKey,
+            quarters: [0, 0, 0, 0],
+            quarterBasePay: [0, 0, 0, 0],
+            quarterTips: [0, 0, 0, 0],
+            months: Array(12).fill(0)
+          }
+        }
+
+        const person = people[name]
+        person.shifts += shifts
+        person.hours += hours
+        person.basePay += basePay
+        person.tips += tips
+        person.total += total
+        person.weeks += 1
+        person.transactions += Number(data.transactions) || 0
+        person.quarters[quarterIndex] += total
+        person.quarterBasePay[quarterIndex] += basePay
+        person.quarterTips[quarterIndex] += tips
+        person.months[monthIndex] += total
+        if ((report.weekStart || periodKey) < person.firstWeek) person.firstWeek = report.weekStart || periodKey
+        if ((report.weekStart || periodKey) > person.lastWeek) person.lastWeek = report.weekStart || periodKey
+
+        detail.push({
+          name,
+          weekStart: report.weekStart || '',
+          weekEnd: report.weekEnd || '',
+          month: monthIndex + 1,
+          quarter: quarterIndex + 1,
+          shifts,
+          hours,
+          basePay,
+          tips,
+          total
+        })
+      })
+    })
+
+    const roster = Object.values(people).sort((a, b) => b.total - a.total)
+    const totals = roster.reduce((acc, person) => ({
+      shifts: acc.shifts + person.shifts,
+      hours: acc.hours + person.hours,
+      basePay: acc.basePay + person.basePay,
+      tips: acc.tips + person.tips,
+      total: acc.total + person.total
+    }), { shifts: 0, hours: 0, basePay: 0, tips: 0, total: 0 })
+
+    // Weeks with no saved report between the first and last one filed - those are
+    // the gaps that make a year-end total understate what was actually paid out.
+    const filedWeeks = new Set(yearReports.map(report => report.weekStart).filter(Boolean))
+    const missingWeeks = []
+    const sortedWeeks = [...filedWeeks].sort()
+    if (sortedWeeks.length > 1) {
+      const cursor = parseDateInput(sortedWeeks[0])
+      const lastWeek = parseDateInput(sortedWeeks[sortedWeeks.length - 1])
+      while (cursor < lastWeek) {
+        cursor.setDate(cursor.getDate() + 7)
+        const key = formatDateKey(cursor)
+        if (cursor < lastWeek && !filedWeeks.has(key)) missingWeeks.push(key)
+      }
+    }
+
+    setTaxStatementText('')
+    setTaxSummary({
+      year,
+      basis: taxBasis,
+      roster,
+      detail,
+      totals,
+      weekCount: yearReports.length,
+      firstWeek: sortedWeeks[0] || '',
+      lastWeek: sortedWeeks[sortedWeeks.length - 1] || '',
+      tipsCollected,
+      unmatchedTips,
+      undistributedTips: tipsCollected - totals.tips,
+      missingWeeks,
+      flaggedWeeks: yearReports
+        .map(report => ({
+          weekStart: report.weekStart || getPeriodKey(report, taxBasis),
+          ...getReportBalance(report)
+        }))
+        .filter(entry => entry.needsRecalculation)
+    })
+  }
+
+  const csvEscape = (value) => {
+    const str = String(value ?? '')
+    return /[",\n]/.test(str) ? `"${str.replace(/"/g, '""')}"` : str
+  }
+
+  const downloadCsv = (filename, rows) => {
+    const csv = rows.map(row => row.map(csvEscape).join(',')).join('\n')
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' })
+    const url = URL.createObjectURL(blob)
+    const link = document.createElement('a')
+    link.href = url
+    link.download = filename
+    document.body.appendChild(link)
+    link.click()
+    document.body.removeChild(link)
+    URL.revokeObjectURL(url)
+  }
+
+  const exportAnnualCsv = () => {
+    if (!taxSummary) return
+    const rows = [[
+      'Name', 'Year', 'Weeks Paid', 'Shifts', 'Hours', 'Base Pay (no tips)', 'Tips', 'Gross Earnings',
+      'Avg $/Hour', 'Tips % of Gross', 'First Week', 'Last Week',
+      'Q1 Gross', 'Q2 Gross', 'Q3 Gross', 'Q4 Gross', '1099-NEC Threshold Met'
+    ]]
+
+    taxSummary.roster.forEach(person => {
+      rows.push([
+        person.name,
+        taxSummary.year,
+        person.weeks,
+        person.shifts,
+        person.hours.toFixed(2),
+        person.basePay.toFixed(2),
+        person.tips.toFixed(2),
+        person.total.toFixed(2),
+        person.hours > 0 ? (person.total / person.hours).toFixed(2) : '',
+        person.total > 0 ? ((person.tips / person.total) * 100).toFixed(1) : '0.0',
+        person.firstWeek,
+        person.lastWeek,
+        person.quarters[0].toFixed(2),
+        person.quarters[1].toFixed(2),
+        person.quarters[2].toFixed(2),
+        person.quarters[3].toFixed(2),
+        person.total >= TAX_1099_THRESHOLD ? 'YES' : 'no'
+      ])
+    })
+
+    rows.push([])
+    rows.push(['TOTALS', taxSummary.year, taxSummary.weekCount, taxSummary.totals.shifts,
+      taxSummary.totals.hours.toFixed(2), taxSummary.totals.basePay.toFixed(2),
+      taxSummary.totals.tips.toFixed(2), taxSummary.totals.total.toFixed(2)])
+    rows.push(['Tips collected at register', taxSummary.tipsCollected.toFixed(2)])
+    rows.push(['Tips distributed to staff', taxSummary.totals.tips.toFixed(2)])
+    rows.push(['Tips not distributed', taxSummary.undistributedTips.toFixed(2)])
+    rows.push(['Week attributed by', taxSummary.basis === 'weekEnd' ? 'week end date' : 'week start date'])
+
+    if (taxSummary.flaggedWeeks.length > 0) {
+      rows.push([])
+      rows.push(['WEEKS NEEDING RECALCULATION', 'Tips Collected', 'Tips Paid Out', 'Difference'])
+      taxSummary.flaggedWeeks.forEach(week => {
+        rows.push([week.weekStart, week.collected.toFixed(2), week.distributed.toFixed(2), week.difference.toFixed(2)])
+      })
+    }
+
+    if (taxSummary.missingWeeks.length > 0) {
+      rows.push([])
+      rows.push(['WEEKS WITH NO SAVED REPORT'])
+      taxSummary.missingWeeks.forEach(week => rows.push([week]))
+    }
+
+    downloadCsv(`brb-tax-summary-${taxSummary.year}.csv`, rows)
+  }
+
+  const exportWeeklyDetailCsv = () => {
+    if (!taxSummary) return
+    const rows = [['Name', 'Week Start', 'Week End', 'Month', 'Quarter', 'Shifts', 'Hours', 'Base Pay', 'Tips', 'Gross']]
+    taxSummary.detail
+      .slice()
+      .sort((a, b) => a.name.localeCompare(b.name) || a.weekStart.localeCompare(b.weekStart))
+      .forEach(row => {
+        rows.push([
+          row.name, row.weekStart, row.weekEnd, row.month, `Q${row.quarter}`,
+          row.shifts, row.hours.toFixed(2), row.basePay.toFixed(2), row.tips.toFixed(2), row.total.toFixed(2)
+        ])
+      })
+    downloadCsv(`brb-tax-detail-${taxSummary.year}.csv`, rows)
+  }
+
+  // Plain-text earnings statement to hand to one barista for their own filing.
+  const showEarningsStatement = (person) => {
+    const lines = []
+    lines.push(`BRB EARNINGS STATEMENT - ${taxSummary.year}`)
+    lines.push(`Paid to: ${person.name}`)
+    lines.push(`Period: ${person.firstWeek} through ${person.lastWeek}`)
+    lines.push('')
+    lines.push(`Weeks paid:        ${person.weeks}`)
+    lines.push(`Shifts worked:     ${person.shifts}`)
+    lines.push(`Hours worked:      ${person.hours.toFixed(1)}`)
+    lines.push('')
+    lines.push(`Base pay (no tips):${money(person.basePay).padStart(12)}`)
+    lines.push(`Tips:              ${money(person.tips).padStart(12)}`)
+    lines.push(`GROSS EARNINGS:    ${money(person.total).padStart(12)}`)
+    lines.push('')
+    lines.push('Quarterly gross:')
+    person.quarters.forEach((amount, index) => {
+      lines.push(`  Q${index + 1}: ${money(amount)}  (base ${money(person.quarterBasePay[index])} + tips ${money(person.quarterTips[index])})`)
+    })
+    lines.push('')
+    lines.push('Gross amounts, no taxes withheld. Keep for your records.')
+    const text = lines.join('\n')
+    setTaxStatementText(text)
+    navigator.clipboard?.writeText(text).catch(err => {
+      console.error('Clipboard write failed, statement shown below instead:', err)
+    })
+  }
+
   return (
     <div className="staff-tab">
       <div className="staff-header">
@@ -844,14 +1204,14 @@ function StaffTab({ user, accessToken, setAccessToken }) {
               <div className="tip-input-section">
                 <h4>Enter Tips</h4>
                 <div className="input-method-toggle">
-                  <button onClick={() => setTipInputMethod('manual')} className={tipInputMethod === 'manual' ? 'active' : ''}>
-                    Manual Entry
+                  <button onClick={() => setTipInputMethod('byHour')} className={tipInputMethod === 'byHour' ? 'active' : ''}>
+                    Paste Card Report (Recommended)
                   </button>
                   <button onClick={() => setTipInputMethod('bulk')} className={tipInputMethod === 'bulk' ? 'active' : ''}>
-                    Bulk Paste
+                    Paste Daily Totals
                   </button>
-                  <button onClick={() => setTipInputMethod('byHour')} className={tipInputMethod === 'byHour' ? 'active' : ''}>
-                    By-Hour Tip Out
+                  <button onClick={() => setTipInputMethod('manual')} className={tipInputMethod === 'manual' ? 'active' : ''}>
+                    Manual Entry
                   </button>
                 </div>
 
@@ -874,6 +1234,12 @@ function StaffTab({ user, accessToken, setAccessToken }) {
 
                 {tipInputMethod === 'bulk' && (
                   <div className="bulk-entry">
+                    <p className="by-hour-description">
+                      For a report that only gives one tip total per day. The day is split half to the
+                      morning window and half to the evening window, then each half is divided by the
+                      hours each barista covered in it. Less precise than the card report above, but the
+                      day's shares always add back up to the day's tips.
+                    </p>
                     <textarea 
                       placeholder="Paste GoDaddy tip report here..."
                       value={bulkTipData}
@@ -886,7 +1252,14 @@ function StaffTab({ user, accessToken, setAccessToken }) {
 
                 {tipInputMethod === 'byHour' && (
                   <div className="bulk-entry">
-                    <p className="by-hour-description">Paste your Square transaction report below. The data should include <strong>Date</strong> and <strong>Tip</strong> columns (tab or comma separated). Tips will be split equally among baristas working at the time of each transaction.</p>
+                    <p className="by-hour-description">
+                      Paste the whole card/Square transaction export below — no typing per hour, just
+                      copy the report. It needs <strong>Date</strong> and <strong>Tip</strong> columns, plus
+                      a <strong>Time</strong> column if you have one. Each transaction is split evenly among
+                      whoever was clocked on at that minute, so the payout always adds back up to the
+                      exact tips collected. Transactions outside every shift (after close) fall back to
+                      that day's crew, weighted by hours worked.
+                    </p>
                     <textarea 
                       placeholder="Paste Square transaction report here (with Date and Tip columns)..."
                       value={squareData}
@@ -906,14 +1279,17 @@ function StaffTab({ user, accessToken, setAccessToken }) {
                 <div className="calculation-results">
                   <h4>Calculation Results</h4>
                   <p><strong>Week:</strong> {calculation.weekStart} to {calculation.weekEnd}</p>
-                  <p><strong>Total Tips:</strong> ${calculation.totalTips.toFixed(2)}</p>
+                  <p><strong>Tips Collected:</strong> ${calculation.totalTips.toFixed(2)}</p>
+                  <p><strong>Tips Distributed:</strong> ${(calculation.tipsDistributed || 0).toFixed(2)}</p>
                   {calculation.isByHour && (
-                    <>
-                      <p><strong>Matched Transactions:</strong> {calculation.matchedTransactions} of {calculation.totalTransactions}</p>
-                      {calculation.unmatchedTips > 0 && (
-                        <p className="unmatched-warning"><strong>Unmatched Tips:</strong> ${calculation.unmatchedTips.toFixed(2)} ({calculation.unmatchedCount} transactions outside any shift)</p>
-                      )}
-                    </>
+                    <p><strong>Matched Transactions:</strong> {calculation.matchedTransactions} of {calculation.totalTransactions}</p>
+                  )}
+                  {calculation.unmatchedTips > 0.005 && (
+                    <p className="unmatched-warning">
+                      <strong>Undistributed Tips:</strong> ${calculation.unmatchedTips.toFixed(2)}{' '}
+                      ({calculation.unmatchedCount}{' '}
+                      {calculation.isByHour ? 'transactions outside any shift' : 'days with tips but nobody scheduled'})
+                    </p>
                   )}
                   
                   <table className="earnings-table">
@@ -1070,20 +1446,263 @@ function StaffTab({ user, accessToken, setAccessToken }) {
 
       {view === 'reports' && (
         <div className="reports-section">
+          <div className="tax-panel">
+            <h3>Year-End Tax Summary</h3>
+            <p className="tax-panel-description">
+              Rolls every saved weekly tip report into per-person totals for the year:
+              base pay (what a barista earns before tips), tips paid out, and gross earnings.
+            </p>
+
+            <div className="tax-controls">
+              <label>
+                Tax year
+                <select value={taxYear} onChange={(e) => setTaxYear(e.target.value)}>
+                  {(availableTaxYears.length > 0 ? availableTaxYears : [String(new Date().getFullYear())]).map(year => (
+                    <option key={year} value={year}>{year}</option>
+                  ))}
+                </select>
+              </label>
+              <label>
+                Count a week in the year of its
+                <select value={taxBasis} onChange={(e) => setTaxBasis(e.target.value)}>
+                  <option value="weekStart">start date</option>
+                  <option value="weekEnd">end date</option>
+                </select>
+              </label>
+              <button onClick={generateTaxSummary} className="tax-generate-btn">
+                Calculate Yearly Totals
+              </button>
+              {taxSummary && (
+                <button
+                  onClick={() => { setTaxSummary(null); setTaxStatementText('') }}
+                  className="tax-clear-btn"
+                >
+                  Clear
+                </button>
+              )}
+            </div>
+
+            {taxSummary && (
+              <div className="tax-results">
+                <div className="tax-stat-grid">
+                  <div className="tax-stat">
+                    <span>Weeks reported</span>
+                    <strong>{taxSummary.weekCount}</strong>
+                    <small>{taxSummary.firstWeek} to {taxSummary.lastWeek}</small>
+                  </div>
+                  <div className="tax-stat">
+                    <span>Total base pay</span>
+                    <strong>{money(taxSummary.totals.basePay)}</strong>
+                    <small>wages before tips</small>
+                  </div>
+                  <div className="tax-stat">
+                    <span>Tips paid out</span>
+                    <strong>{money(taxSummary.totals.tips)}</strong>
+                    <small>distributed to staff</small>
+                  </div>
+                  <div className="tax-stat tax-stat-highlight">
+                    <span>Total labor cost</span>
+                    <strong>{money(taxSummary.totals.total)}</strong>
+                    <small>base pay + tips</small>
+                  </div>
+                  <div className="tax-stat">
+                    <span>Tips collected</span>
+                    <strong>{money(taxSummary.tipsCollected)}</strong>
+                    <small>from the register reports</small>
+                  </div>
+                  <div className="tax-stat">
+                    <span>Total hours</span>
+                    <strong>{taxSummary.totals.hours.toFixed(1)}</strong>
+                    <small>{taxSummary.totals.shifts} shifts</small>
+                  </div>
+                </div>
+
+                {Math.abs(taxSummary.undistributedTips) >= 0.01 && (
+                  <p className="unmatched-warning">
+                    <strong>{money(Math.abs(taxSummary.undistributedTips))}</strong> of collected tips
+                    {taxSummary.undistributedTips > 0 ? ' was never distributed' : ' more was paid out than collected'}
+                    {taxSummary.unmatchedTips > 0 && ` (${money(taxSummary.unmatchedTips)} flagged as unmatched to any shift)`}.
+                    Reconcile this against the register totals before filing.
+                  </p>
+                )}
+
+                {taxSummary.flaggedWeeks.length > 0 && (
+                  <p className="unmatched-warning">
+                    <strong>{taxSummary.flaggedWeeks.length} week(s) in {taxSummary.year} need recalculation</strong>{' '}
+                    — tips paid out don't match tips collected for: {taxSummary.flaggedWeeks
+                      .map(week => `${week.weekStart} (${week.difference > 0 ? '+' : '-'}${money(Math.abs(week.difference))})`)
+                      .join(', ')}. The totals below include those figures as saved.
+                  </p>
+                )}
+
+                {taxSummary.missingWeeks.length > 0 && (
+                  <p className="unmatched-warning">
+                    <strong>{taxSummary.missingWeeks.length} week(s) have no saved report</strong> between
+                    {' '}{taxSummary.firstWeek} and {taxSummary.lastWeek}: {taxSummary.missingWeeks.join(', ')}.
+                    Those weeks are missing from every total below.
+                  </p>
+                )}
+
+                <h4>Per-person earnings — {taxSummary.year}</h4>
+                <div className="tax-table-scroll">
+                  <table className="earnings-table tax-table">
+                    <thead>
+                      <tr>
+                        <th>Barista</th>
+                        <th>Weeks</th>
+                        <th>Shifts</th>
+                        <th>Hours</th>
+                        <th>Base Pay (no tips)</th>
+                        <th>Tips</th>
+                        <th>Gross (base + tips)</th>
+                        <th>Avg $/hr</th>
+                        <th>Tips %</th>
+                        <th>1099-NEC</th>
+                        <th></th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {taxSummary.roster.map(person => (
+                        <tr key={person.name}>
+                          <td><strong>{person.name}</strong></td>
+                          <td>{person.weeks}</td>
+                          <td>{person.shifts}</td>
+                          <td>{person.hours.toFixed(1)}</td>
+                          <td>{money(person.basePay)}</td>
+                          <td>{money(person.tips)}</td>
+                          <td><strong>{money(person.total)}</strong></td>
+                          <td>{person.hours > 0 ? money(person.total / person.hours) : '—'}</td>
+                          <td>{person.total > 0 ? `${((person.tips / person.total) * 100).toFixed(1)}%` : '—'}</td>
+                          <td>
+                            <span className={person.total >= TAX_1099_THRESHOLD ? 'tax-flag-yes' : 'tax-flag-no'}>
+                              {person.total >= TAX_1099_THRESHOLD ? 'Required' : 'Under $600'}
+                            </span>
+                          </td>
+                          <td>
+                            <button className="tax-statement-btn" onClick={() => showEarningsStatement(person)}>
+                              Statement
+                            </button>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                    <tfoot>
+                      <tr>
+                        <td><strong>All staff</strong></td>
+                        <td>{taxSummary.weekCount}</td>
+                        <td>{taxSummary.totals.shifts}</td>
+                        <td>{taxSummary.totals.hours.toFixed(1)}</td>
+                        <td>{money(taxSummary.totals.basePay)}</td>
+                        <td>{money(taxSummary.totals.tips)}</td>
+                        <td><strong>{money(taxSummary.totals.total)}</strong></td>
+                        <td>{taxSummary.totals.hours > 0 ? money(taxSummary.totals.total / taxSummary.totals.hours) : '—'}</td>
+                        <td colSpan={3}></td>
+                      </tr>
+                    </tfoot>
+                  </table>
+                </div>
+
+                <h4>Quarterly gross — for quarterly filings and estimated payments</h4>
+                <div className="tax-table-scroll">
+                  <table className="earnings-table tax-table">
+                    <thead>
+                      <tr>
+                        <th>Barista</th>
+                        <th>Q1 (Jan–Mar)</th>
+                        <th>Q2 (Apr–Jun)</th>
+                        <th>Q3 (Jul–Sep)</th>
+                        <th>Q4 (Oct–Dec)</th>
+                        <th>Year</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {taxSummary.roster.map(person => (
+                        <tr key={person.name}>
+                          <td><strong>{person.name}</strong></td>
+                          {person.quarters.map((amount, index) => (
+                            <td key={index}>{money(amount)}</td>
+                          ))}
+                          <td><strong>{money(person.total)}</strong></td>
+                        </tr>
+                      ))}
+                    </tbody>
+                    <tfoot>
+                      <tr>
+                        <td><strong>All staff</strong></td>
+                        {[0, 1, 2, 3].map(index => (
+                          <td key={index}>
+                            {money(taxSummary.roster.reduce((sum, person) => sum + person.quarters[index], 0))}
+                          </td>
+                        ))}
+                        <td><strong>{money(taxSummary.totals.total)}</strong></td>
+                      </tr>
+                    </tfoot>
+                  </table>
+                </div>
+
+                <div className="tax-export-buttons">
+                  <button onClick={exportAnnualCsv}>Download Annual Summary (CSV)</button>
+                  <button onClick={exportWeeklyDetailCsv}>Download Week-by-Week Detail (CSV)</button>
+                </div>
+
+                {taxStatementText && (
+                  <div className="report-text-block">
+                    <p>Earnings statement (copied to clipboard — paste it to the barista):</p>
+                    <textarea
+                      readOnly
+                      value={taxStatementText}
+                      rows={Math.min(24, taxStatementText.split('\n').length)}
+                      onFocus={(e) => e.target.select()}
+                    />
+                  </div>
+                )}
+
+                <p className="tax-disclaimer">
+                  All figures are gross amounts with no taxes withheld, taken straight from the saved
+                  weekly tip reports. Totals are only as complete as the reports that were saved — check
+                  the week coverage above before handing anything to an accountant.
+                </p>
+              </div>
+            )}
+          </div>
+
           <h3>Saved Reports</h3>
+          {flaggedReports.length > 0 && (
+            <p className="unmatched-warning">
+              <strong>{flaggedReports.length} of {reports.length} saved reports don't balance.</strong>{' '}
+              The tips paid out don't match the tips collected — these were almost certainly written
+              before the tip split was fixed. Re-paste the card report for each flagged week and save to
+              correct it; every total on this page uses whatever is stored.
+            </p>
+          )}
           {reports.length === 0 ? (
             <p>No reports yet. Calculate and save your first report!</p>
           ) : (
             <div className="reports-list">
-              {reports.map(report => (
-                <div key={report.id} className="report-card">
-                  <h4>Week of {report.weekStart}</h4>
-                  <p>Total Tips: ${report.totalTips?.toFixed(2)}</p>
-                  <p>Created: {new Date(report.createdAt?.toDate()).toLocaleDateString()}</p>
-                  <button>View Details</button>
-                  <button>Download PDF</button>
-                </div>
-              ))}
+              {reports.map(report => {
+                const balance = getReportBalance(report)
+                return (
+                  <div
+                    key={report.id}
+                    className={`report-card${balance.needsRecalculation ? ' report-card-flagged' : ''}`}
+                  >
+                    <h4>Week of {report.weekStart}</h4>
+                    <p>Tips Collected: {money(balance.collected)}</p>
+                    <p>Tips Paid Out: {money(balance.distributed)}</p>
+                    <p>Created: {new Date(report.createdAt?.toDate()).toLocaleDateString()}</p>
+                    {balance.needsRecalculation && (
+                      <p className="report-flag">
+                        <strong>Needs recalculation</strong> — paid out{' '}
+                        {balance.difference > 0 ? 'over' : 'under'} by{' '}
+                        {money(Math.abs(balance.difference))}. Re-paste this week's card report on the
+                        Tip Calculator and save; it overwrites this document in place.
+                      </p>
+                    )}
+                    <button>View Details</button>
+                    <button>Download PDF</button>
+                  </div>
+                )
+              })}
             </div>
           )}
         </div>
