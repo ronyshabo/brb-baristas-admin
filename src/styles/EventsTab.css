@@ -289,3 +289,108 @@
 .event-actions button:hover {
   background-color: #2980b9;
 }
+
+/* Google Calendar connection + sync state */
+.google-connect-banner,
+.calendar-sync-banner {
+  border-radius: 12px;
+  padding: 1.25rem;
+  margin-bottom: 1.5rem;
+}
+
+.google-connect-banner {
+  background: #fdf3e3;
+  border: 2px solid #e67e22;
+}
+
+.calendar-sync-banner {
+  background: #fdecea;
+  border: 2px solid #e74c3c;
+}
+
+.google-connect-banner p,
+.calendar-sync-banner p {
+  margin: 0 0 0.75rem;
+  line-height: 1.5;
+}
+
+.google-connect-banner p { color: #7d4a11; }
+.calendar-sync-banner p { color: #922b21; }
+
+.google-connect-banner button,
+.calendar-sync-banner button {
+  padding: 0.75rem 1.5rem;
+  color: white;
+  border: none;
+  border-radius: 8px;
+  font-size: 1rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.3s;
+}
+
+.google-connect-banner button { background: #e67e22; }
+.google-connect-banner button:hover:not(:disabled) { background: #d35400; }
+.calendar-sync-banner button { background: #e74c3c; }
+.calendar-sync-banner button:hover:not(:disabled) { background: #c0392b; }
+
+.google-connect-banner button:disabled,
+.calendar-sync-banner button:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.event-destinations {
+  display: flex;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+  margin: 0.5rem 0;
+}
+
+.event-destinations span {
+  padding: 0.2rem 0.65rem;
+  border-radius: 999px;
+  font-size: 0.8rem;
+  font-weight: 600;
+}
+
+.destination-ok {
+  background: #eafaf1;
+  color: #1e8449;
+}
+
+.destination-missing {
+  background: #fdecea;
+  color: #c0392b;
+}
+
+.bulk-actions-bar {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  flex-wrap: wrap;
+  background: #f8f9fa;
+  border-radius: 8px;
+  padding: 0.75rem 1rem;
+  margin-bottom: 1rem;
+}
+
+.bulk-actions-bar button {
+  padding: 0.5rem 1rem;
+  background: #3498db;
+  color: white;
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 0.9rem;
+}
+
+.bulk-actions-bar button:disabled {
+  background: #bdc3c7;
+  cursor: not-allowed;
+}
+
+.bulk-selection-count {
+  color: #7f8c8d;
+  font-size: 0.9rem;
+}

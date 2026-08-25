@@ -1,6 +1,14 @@
 import { useState, useEffect } from 'react'
-import { collection, getDocs, query, where, updateDoc, doc, deleteDoc, getDoc } from 'firebase/firestore'
+import { collection, getDocs, query, where, orderBy } from 'firebase/firestore'
 import { db } from '../firebase/config'
+import { signInWithGoogleCalendar } from '../firebase/googleAuth'
+import {
+  approveEvent,
+  isMissingFromCalendar,
+  rejectEvent,
+  summarizeApprovals,
+  syncEventToCalendar,
+} from '../services/eventSync'
 import '../styles/BookingsTab.css'
 
 // Helper function to display time in 12-hour format
@@ -13,214 +21,222 @@ const formatTime12Hour = (time24) => {
   return `${hour12}:${minutes} ${period}`
 }
 
-function BookingsTab({ accessToken }) {
-  const [bookings, setBookings] = useState([])
+const formatSubmitted = (value) => {
+  const date = value?.toDate?.() || (value ? new Date(value) : null)
+  return date && !Number.isNaN(date.getTime()) ? date.toLocaleDateString() : 'Unknown'
+}
+
+// Requests from the band portal are written straight into the `events` collection
+// with status 'pending' - there is no separate `bookings` collection, which is why
+// this tab used to be permanently empty.
+function BookingsTab({ accessToken, setAccessToken }) {
+  const [requests, setRequests] = useState([])
   const [loading, setLoading] = useState(true)
   const [filter, setFilter] = useState('pending')
   const [error, setError] = useState(null)
+  const [busyId, setBusyId] = useState(null)
+  const [connectingGoogle, setConnectingGoogle] = useState(false)
 
-  const calendarId = import.meta.env.VITE_GOOGLE_CALENDAR_ID
-  const timeZone = import.meta.env.VITE_GOOGLE_CALENDAR_TIME_ZONE || 'America/Chicago'
-
-  // Fetch bookings from Firestore on component mount
-  useEffect(() => {
-    const fetchBookings = async () => {
+  const fetchRequests = async () => {
+    setLoading(true)
+    setError(null)
+    try {
+      let snapshot
       try {
-        const q = query(collection(db, 'bookings'), where('status', '==', filter))
-        const querySnapshot = await getDocs(q)
-        const bookingsList = []
-        querySnapshot.forEach((doc) => {
-          bookingsList.push({ id: doc.id, ...doc.data() })
-        })
-        setBookings(bookingsList)
-      } catch (err) {
-        console.error('Error fetching bookings:', err)
-      } finally {
-        setLoading(false)
+        snapshot = await getDocs(
+          query(collection(db, 'events'), where('status', '==', filter), orderBy('date'))
+        )
+      } catch (indexError) {
+        // orderBy + where needs a composite index; fall back to sorting client-side
+        console.warn('Falling back to unordered query:', indexError)
+        snapshot = await getDocs(query(collection(db, 'events'), where('status', '==', filter)))
       }
+
+      const list = []
+      snapshot.forEach((docSnapshot) => list.push({ id: docSnapshot.id, ...docSnapshot.data() }))
+      list.sort((a, b) => String(a.date || '').localeCompare(String(b.date || '')))
+      setRequests(list)
+    } catch (err) {
+      console.error('Error fetching event requests:', err)
+      setError('Could not load event requests. Please refresh and try again.')
+    } finally {
+      setLoading(false)
     }
-    fetchBookings()
-  }, [filter])
-
-  const createGoogleCalendarEvent = async (booking) => {
-    if (!calendarId) {
-      throw new Error('Missing Google Calendar configuration. Set VITE_GOOGLE_CALENDAR_ID.')
-    }
-
-    if (!accessToken) {
-      throw new Error('Google Calendar access not authorized. Please log in with Google.')
-    }
-
-    const startDateTime = `${booking.eventDate}T${booking.eventStartTime}:00`
-    const endDateTime = `${booking.eventDate}T${booking.eventEndTime}:00`
-
-    const response = await fetch(
-      `https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(calendarId)}/events`,
-      {
-        method: 'POST',
-        headers: {
-          Authorization: `Bearer ${accessToken}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          summary: booking.eventTitle,
-          description: [
-            booking.notes ? `Notes: ${booking.notes}` : null,
-            `Band: ${booking.bandName}`,
-            `Email: ${booking.bandEmail}`,
-          ]
-            .filter(Boolean)
-            .join('\n'),
-          start: {
-            dateTime: startDateTime,
-            timeZone,
-          },
-          end: {
-            dateTime: endDateTime,
-            timeZone,
-          },
-        }),
-      }
-    )
-
-    const data = await response.json()
-    if (!response.ok) {
-      const apiMessage = data?.error?.message || 'Failed to create Google Calendar event'
-      throw new Error(apiMessage)
-    }
-
-    return data.id
   }
 
-  const handleApproveBooking = async (bookingId) => {
-    if (!accessToken) {
-      setError('Please log in with Google (Calendar) to approve bookings.')
-      alert('Please log in with Google (Calendar) to approve bookings.')
+  useEffect(() => {
+    fetchRequests()
+  }, [filter])
+
+  const connectGoogleCalendar = async () => {
+    setConnectingGoogle(true)
+    try {
+      const { accessToken: token } = await signInWithGoogleCalendar()
+      if (token) {
+        setAccessToken?.(token)
+      } else {
+        alert('Google did not return calendar access. Please try again.')
+      }
+    } catch (err) {
+      console.error('Error connecting Google Calendar:', err)
+      alert('Failed to connect Google Calendar: ' + (err?.message || 'unknown error'))
+    } finally {
+      setConnectingGoogle(false)
+    }
+  }
+
+  const handleApprove = async (request) => {
+    setBusyId(request.id)
+    try {
+      const { calendarSynced, calendarError } = await approveEvent(request, accessToken)
+      // Approved rows leave the pending list; keep them if that filter is showing
+      setRequests((previous) =>
+        filter === 'pending' ? previous.filter((item) => item.id !== request.id) : previous
+      )
+      alert(summarizeApprovals([{ calendarSynced, calendarError }]))
+    } catch (err) {
+      console.error('Error approving event request:', err)
+      alert('Failed to approve this request.')
+    } finally {
+      setBusyId(null)
+    }
+  }
+
+  const handleReject = async (request) => {
+    if (!window.confirm(`Reject "${request.title}"? The band will no longer see it as pending.`)) {
       return
     }
 
+    setBusyId(request.id)
     try {
-      const booking = bookings.find(b => b.id === bookingId)
-      if (!booking) return
-
-      // Update booking status
-      await updateDoc(doc(db, 'bookings', bookingId), {
-        status: 'approved',
-        approvedAt: new Date(),
-      })
-
-      const eventRef = doc(db, 'events', booking.eventId)
-      const eventSnapshot = await getDoc(eventRef)
-      const existingCalendarEventId = eventSnapshot.data()?.googleCalendarEventId || null
-
-      // Update event status to 'booked'
-      await updateDoc(eventRef, {
-        status: 'booked',
-        bookedBandId: booking.bandId,
-        bookedAt: new Date(),
-      })
-
-      if (!existingCalendarEventId) {
-        try {
-          const googleCalendarEventId = await createGoogleCalendarEvent(booking)
-          await updateDoc(eventRef, { googleCalendarEventId })
-        } catch (err) {
-          console.error('Error creating Google Calendar event:', err)
-          alert(err?.message || 'Failed to add event to Google Calendar')
-        }
-      }
-
-      // Delete other pending bookings for the same event
-      const otherBookingsQuery = query(
-        collection(db, 'bookings'),
-        where('eventId', '==', booking.eventId),
-        where('status', '==', 'pending')
+      await rejectEvent(request)
+      setRequests((previous) =>
+        filter === 'pending' ? previous.filter((item) => item.id !== request.id) : previous
       )
-      const otherBookingsSnapshot = await getDocs(otherBookingsQuery)
-      const deletePromises = otherBookingsSnapshot.docs
-        .filter(doc => doc.id !== bookingId)
-        .map(doc => deleteDoc(doc.ref))
-      await Promise.all(deletePromises)
-
-      // Refresh bookings list
-      setBookings(bookings.filter(b => b.id === bookingId || b.eventId !== booking.eventId)
-        .map(b => b.id === bookingId ? { ...b, status: 'approved', approvedAt: new Date() } : b))
-      
-      alert('Booking approved! Event marked as booked and other pending bookings removed.')
     } catch (err) {
-      console.error('Error approving booking:', err)
-      alert('Failed to approve booking')
+      console.error('Error rejecting event request:', err)
+      alert('Failed to reject this request.')
+    } finally {
+      setBusyId(null)
     }
   }
 
-  const handleRejectBooking = async (bookingId) => {
+  const handleSyncCalendar = async (request) => {
+    if (!accessToken) {
+      alert('Connect Google Calendar first.')
+      return
+    }
+    setBusyId(request.id)
     try {
-      await deleteDoc(doc(db, 'bookings', bookingId))
-      setBookings(bookings.filter(b => b.id !== bookingId))
-      alert('Booking rejected!')
+      const updates = await syncEventToCalendar(request, accessToken)
+      setRequests((previous) =>
+        previous.map((item) => (item.id === request.id ? { ...item, ...updates } : item))
+      )
+      alert('Added to Google Calendar.')
     } catch (err) {
-      console.error('Error rejecting booking:', err)
-      alert('Failed to reject booking')
+      console.error('Error syncing to Google Calendar:', err)
+      alert(err?.message || 'Failed to add to Google Calendar.')
+    } finally {
+      setBusyId(null)
     }
   }
 
-  if (loading) return <div>Loading bookings...</div>
+  if (loading) return <div>Loading event requests...</div>
+
+  const emptyMessage = {
+    pending: 'No pending requests. Anything a band submits from the band portal lands here.',
+    booked: 'No approved events yet.',
+    rejected: 'No rejected requests.',
+  }[filter]
 
   return (
     <div className="bookings-tab">
       <div className="bookings-header">
         <h2>Pending Bookings</h2>
         <div className="filter-buttons">
-          <button
-            className={filter === 'pending' ? 'active' : ''}
-            onClick={() => setFilter('pending')}
-          >
+          <button className={filter === 'pending' ? 'active' : ''} onClick={() => setFilter('pending')}>
             Pending
           </button>
-          <button
-            className={filter === 'approved' ? 'active' : ''}
-            onClick={() => setFilter('approved')}
-          >
+          <button className={filter === 'booked' ? 'active' : ''} onClick={() => setFilter('booked')}>
             Approved
+          </button>
+          <button className={filter === 'rejected' ? 'active' : ''} onClick={() => setFilter('rejected')}>
+            Rejected
           </button>
         </div>
       </div>
 
-      {error && <p style={{ color: '#e74c3c', fontWeight: '600', marginBottom: '1rem' }}>{error}</p>}
+      {!accessToken && (
+        <div className="google-connect-banner">
+          <p>
+            Google Calendar is not connected. Approving now publishes to the website but{' '}
+            <strong>skips the calendar</strong>.
+          </p>
+          <button onClick={connectGoogleCalendar} disabled={connectingGoogle}>
+            {connectingGoogle ? 'Connecting...' : 'Connect Google Calendar'}
+          </button>
+        </div>
+      )}
+
+      {error && <p className="bookings-error">{error}</p>}
 
       <div className="bookings-list">
-        {bookings.length === 0 ? (
-          <p>No {filter} bookings at this time.</p>
+        {requests.length === 0 ? (
+          <p>{emptyMessage}</p>
         ) : (
-          bookings.map((booking) => (
-            <div key={booking.id} className="booking-card">
+          requests.map((request) => (
+            <div key={request.id} className="booking-card">
               <div className="booking-info">
-                <h3>{booking.bandName}</h3>
-                <p><strong>Email:</strong> {booking.bandEmail}</p>
-                <p><strong>Event:</strong> {booking.eventTitle}</p>
-                <p><strong>Date:</strong> {booking.eventDate}</p>
-                <p><strong>Time:</strong> {formatTime12Hour(booking.eventStartTime)} - {formatTime12Hour(booking.eventEndTime)}</p>
-                <p><strong>Notes:</strong> {booking.notes || 'None'}</p>
-                <p><strong>Submitted:</strong> {new Date(booking.createdAt?.toDate?.() || booking.createdAt).toLocaleDateString()}</p>
+                <h3>{request.title || 'Untitled event'}</h3>
+                {request.bandName && <p><strong>Band:</strong> {request.bandName}</p>}
+                {request.bandEmail && <p><strong>Email:</strong> {request.bandEmail}</p>}
+                <p><strong>Date:</strong> {request.date || 'Not set'}</p>
+                <p>
+                  <strong>Time:</strong>{' '}
+                  {request.startTime
+                    ? `${formatTime12Hour(request.startTime)} - ${formatTime12Hour(request.endTime)}`
+                    : 'Not set'}
+                </p>
+                {request.venue && <p><strong>Venue:</strong> {request.venue}</p>}
+                <p><strong>Details:</strong> {request.description || request.notes || 'None'}</p>
+                <p><strong>Submitted:</strong> {formatSubmitted(request.createdAt)}</p>
+                <p className="booking-source">
+                  {request.bandId ? 'Submitted from the band portal' : 'Created by an admin'}
+                </p>
+                {isMissingFromCalendar(request) && (
+                  <p className="booking-warning">Approved but not on Google Calendar.</p>
+                )}
               </div>
-              {filter === 'pending' && (
-                <div className="booking-actions">
-                  <button 
+
+              <div className="booking-actions">
+                {filter === 'pending' && (
+                  <>
+                    <button
+                      className="approve-btn"
+                      onClick={() => handleApprove(request)}
+                      disabled={busyId === request.id}
+                    >
+                      {busyId === request.id ? 'Approving...' : 'Approve'}
+                    </button>
+                    <button
+                      className="reject-btn"
+                      onClick={() => handleReject(request)}
+                      disabled={busyId === request.id}
+                    >
+                      Reject
+                    </button>
+                  </>
+                )}
+                {isMissingFromCalendar(request) && (
+                  <button
                     className="approve-btn"
-                    onClick={() => handleApproveBooking(booking.id)}
-                    disabled={!accessToken}
-                    title={!accessToken ? 'Log in with Google (Calendar) to approve' : ''}
+                    onClick={() => handleSyncCalendar(request)}
+                    disabled={busyId === request.id || !accessToken}
                   >
-                    Approve
+                    Add to Calendar
                   </button>
-                  <button 
-                    className="reject-btn"
-                    onClick={() => handleRejectBooking(booking.id)}
-                  >
-                    Reject
-                  </button>
-                </div>
-              )}
+                )}
+              </div>
             </div>
           ))
         )}

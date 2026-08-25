@@ -2,6 +2,18 @@ import { useState, useEffect } from 'react'
 import { collection, getDocs, addDoc, updateDoc, deleteDoc, doc, setDoc } from 'firebase/firestore'
 import { db } from '../firebase/config'
 import { v4 as uuidv4 } from 'uuid'
+import { signInWithGoogleCalendar } from '../firebase/googleAuth'
+import {
+  approveEvent,
+  calendarId,
+  isApprovedEvent,
+  createCalendarEvent,
+  isHiddenFromWebsite,
+  isMissingFromCalendar,
+  publishEventToWebsite,
+  summarizeApprovals,
+  syncEventToCalendar,
+} from '../services/eventSync'
 import '../styles/EventsTab.css'
 
 const getInitialFormData = () => ({
@@ -19,7 +31,7 @@ const getInitialFormData = () => ({
   recurrenceMode: 'weeks',
   recurrenceWeeks: '1',
   recurrenceEndDate: '',
-  showOnWebsite: false,
+  showOnWebsite: true,
 })
 
 // Helper function to convert 24-hour time to 12-hour format
@@ -47,7 +59,7 @@ const formatTime12Hour = (time24) => {
   return `${hour}:${minute} ${period}`
 }
 
-function EventsTab({ user, accessToken }) {
+function EventsTab({ user, accessToken, setAccessToken }) {
   // Helper: Find conflicting event IDs (same date and time)
   const getConflictingEventIds = () => {
     const conflicts = new Set();
@@ -74,61 +86,29 @@ function EventsTab({ user, accessToken }) {
   const [showHiddenEvents, setShowHiddenEvents] = useState(false)
   const [formData, setFormData] = useState(getInitialFormData())
   const [selectedEventDetails, setSelectedEventDetails] = useState(null)
+  const [connectingGoogle, setConnectingGoogle] = useState(false)
+  const [syncingCalendar, setSyncingCalendar] = useState(false)
+  const [publishingWebsite, setPublishingWebsite] = useState(false)
 
-  const calendarId = import.meta.env.VITE_GOOGLE_CALENDAR_ID
-  const timeZone = import.meta.env.VITE_GOOGLE_CALENDAR_TIME_ZONE || 'America/Chicago'
   const signupBaseUrl =
     import.meta.env.VITE_SIGNUP_BASE_URL ||
     (typeof window !== 'undefined' ? window.location.origin : '')
 
-  const createGoogleCalendarEventFromEvent = async (event) => {
-    if (!calendarId) {
-      throw new Error('Missing Google Calendar configuration')
-    }
-
-    if (!accessToken) {
-      throw new Error('Google Calendar access not authorized')
-    }
-
-    const startDateTime = `${event.date}T${event.startTime}:00`
-    const endDateTime = `${event.date}T${event.endTime}:00`
-
-    const response = await fetch(
-      `https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(calendarId)}/events`,
-      {
-        method: 'POST',
-        headers: {
-          Authorization: `Bearer ${accessToken}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          summary: event.title,
-          description: [
-            event.description ? `Description: ${event.description}` : null,
-            event.bandEmail ? `Email: ${event.bandEmail}` : null,
-            'Booked directly by admin',
-          ]
-            .filter(Boolean)
-            .join('\n'),
-          start: {
-            dateTime: startDateTime,
-            timeZone,
-          },
-          end: {
-            dateTime: endDateTime,
-            timeZone,
-          },
-        }),
+  const connectGoogleCalendar = async () => {
+    setConnectingGoogle(true)
+    try {
+      const { accessToken: token } = await signInWithGoogleCalendar()
+      if (token) {
+        setAccessToken?.(token)
+      } else {
+        alert('Google did not return calendar access. Please try again.')
       }
-    )
-
-    const data = await response.json()
-    if (!response.ok) {
-      const apiMessage = data?.error?.message || 'Failed to create Google Calendar event'
-      throw new Error(apiMessage)
+    } catch (err) {
+      console.error('Error connecting Google Calendar:', err)
+      alert('Failed to connect Google Calendar: ' + (err?.message || 'unknown error'))
+    } finally {
+      setConnectingGoogle(false)
     }
-
-    return data.id
   }
 
   // TODO: Fetch events from Firestore on component mount
@@ -180,8 +160,8 @@ function EventsTab({ user, accessToken }) {
         const representative = sortedGrouped[0]
         const firstOccurrence = sortedGrouped[0]
         const lastOccurrence = sortedGrouped[sortedGrouped.length - 1]
-        const allBooked = sortedGrouped.every((event) => event.status === 'booked')
-        const someBooked = sortedGrouped.some((event) => event.status === 'booked')
+        const allBooked = sortedGrouped.every(isApprovedEvent)
+        const someBooked = sortedGrouped.some(isApprovedEvent)
 
         return {
           entryId,
@@ -191,7 +171,9 @@ function EventsTab({ user, accessToken }) {
           isSeries: sortedGrouped.length > 1,
           firstOccurrence,
           lastOccurrence,
-          status: allBooked ? 'booked' : someBooked ? 'partial' : 'pending',
+          status: allBooked ? 'booked' : someBooked ? 'partial' : sortedGrouped.every((event) => event.status === 'rejected') ? 'rejected' : 'pending',
+          missingFromCalendar: sortedGrouped.some(isMissingFromCalendar),
+          publishedToWebsite: sortedGrouped.some((event) => isApprovedEvent(event) && event.showOnWebsite !== false),
           sortTs: getEventDateTime(lastOccurrence),
         }
       })
@@ -248,14 +230,17 @@ function EventsTab({ user, accessToken }) {
 
           if (accessToken) {
             try {
-              googleCalendarEventId = await createGoogleCalendarEventFromEvent({
-                title: formData.title,
-                date: dateValue,
-                startTime,
-                endTime,
-                description: formData.description,
-                bandEmail: formData.bandEmail,
-              })
+              googleCalendarEventId = await createCalendarEvent(
+                {
+                  title: formData.title,
+                  date: dateValue,
+                  startTime,
+                  endTime,
+                  description: formData.description,
+                  bandEmail: formData.bandEmail,
+                },
+                accessToken
+              )
               calendarSyncedCount += 1
             } catch (calendarError) {
               calendarFailedCount += 1
@@ -449,61 +434,124 @@ function EventsTab({ user, accessToken }) {
     }
   }
 
+  // Returns a result object instead of a bare boolean so batch callers can report
+  // which approvals reached Google Calendar and which only reached the website.
   const handleAdminApproveEvent = async (eventId, options = { silent: false }) => {
     const { silent = false } = options
 
     try {
       const event = events.find((entry) => entry.id === eventId)
-      if (!event) return false
+      if (!event) return null
 
-      if (event.status === 'booked') {
-        if (!silent) {
-          alert('This event is already booked.')
-        }
-        return false
+      if (isApprovedEvent(event)) {
+        if (!silent) alert('This event is already booked.')
+        return null
       }
 
-      let googleCalendarEventId = event.googleCalendarEventId || null
-
-      if (!googleCalendarEventId && accessToken) {
-        try {
-          googleCalendarEventId = await createGoogleCalendarEventFromEvent(event)
-        } catch (calendarError) {
-          console.error('Error creating Google Calendar event:', calendarError)
-          if (!silent) {
-            alert(calendarError?.message || 'Event approved, but failed to add to Google Calendar.')
-          }
-        }
-      }
-
-      const updatedData = {
-        ...event,
-        status: 'booked',
-        bookedAt: new Date(),
+      const { updates, calendarSynced, calendarError } = await approveEvent(event, accessToken, {
         bookedDirectlyByAdmin: true,
-        googleCalendarEventId,
-      }
-
-      const { id: _, ...eventDocData } = updatedData
-
-      await setDoc(doc(db, 'events', eventId), eventDocData)
+      })
 
       setEvents((previousEvents) =>
-        previousEvents.map((entry) => (entry.id === eventId ? { ...updatedData, id: eventId } : entry))
+        previousEvents.map((entry) => (entry.id === eventId ? { ...entry, ...updates } : entry))
       )
       setSelectedEventIds((previousSelected) => previousSelected.filter((id) => id !== eventId))
 
       if (!silent) {
-        alert('Event approved directly by admin!')
+        alert(summarizeApprovals([{ calendarSynced, calendarError }]))
       }
-      return true
+      return { eventId, calendarSynced, calendarError }
     } catch (err) {
       console.error('Error approving event directly:', err)
-      if (!silent) {
-        alert('Failed to approve event')
-      }
-      return false
+      if (!silent) alert('Failed to approve event')
+      return null
     }
+  }
+
+  // Publishes approved events the website is still hiding. Approving sets
+  // showOnWebsite now, but anything approved before that keeps its old value.
+  const handlePublishHiddenEvents = async () => {
+    const hidden = events.filter(isHiddenFromWebsite)
+    if (hidden.length === 0) {
+      alert('Every approved event is already visible on the website.')
+      return
+    }
+    if (!confirm(`Publish ${hidden.length} approved event(s) to the website?`)) return
+
+    setPublishingWebsite(true)
+    const published = []
+    const failures = []
+
+    for (const event of hidden) {
+      try {
+        const updates = await publishEventToWebsite(event)
+        published.push({ id: event.id, updates })
+      } catch (err) {
+        console.error(`Failed to publish event ${event.id}:`, err)
+        failures.push(err?.message || 'unknown error')
+      }
+    }
+
+    if (published.length > 0) {
+      const updatesById = new Map(published.map((entry) => [entry.id, entry.updates]))
+      setEvents((previousEvents) =>
+        previousEvents.map((entry) =>
+          updatesById.has(entry.id) ? { ...entry, ...updatesById.get(entry.id) } : entry
+        )
+      )
+    }
+
+    setPublishingWebsite(false)
+    alert(
+      failures.length === 0
+        ? `Published ${published.length} event${published.length === 1 ? '' : 's'} to the website.`
+        : `Published ${published.length}. ${failures.length} failed: ${failures[0]}`
+    )
+  }
+
+  // Pushes already-approved events that never reached the calendar. Before this,
+  // approving without a live Google token dropped the calendar write silently and
+  // there was no way to notice, let alone retry.
+  const handleSyncMissingCalendarEvents = async () => {
+    const missing = events.filter(isMissingFromCalendar)
+    if (missing.length === 0) {
+      alert('Every approved event is already on Google Calendar.')
+      return
+    }
+    if (!accessToken) {
+      alert('Connect Google Calendar first, then run the sync again.')
+      return
+    }
+
+    setSyncingCalendar(true)
+    const synced = []
+    const failures = []
+
+    for (const event of missing) {
+      try {
+        const updates = await syncEventToCalendar(event, accessToken)
+        synced.push({ id: event.id, updates })
+      } catch (err) {
+        console.error(`Failed to sync event ${event.id} to Google Calendar:`, err)
+        failures.push({ event, message: err?.message || 'unknown error' })
+      }
+    }
+
+    if (synced.length > 0) {
+      const updatesById = new Map(synced.map((entry) => [entry.id, entry.updates]))
+      setEvents((previousEvents) =>
+        previousEvents.map((entry) =>
+          updatesById.has(entry.id) ? { ...entry, ...updatesById.get(entry.id) } : entry
+        )
+      )
+    }
+
+    setSyncingCalendar(false)
+    alert(
+      failures.length === 0
+        ? `Added ${synced.length} event${synced.length === 1 ? '' : 's'} to Google Calendar.`
+        : `Added ${synced.length} to Google Calendar. ${failures.length} still failed: ${failures[0].message}`
+    )
   }
 
   const handleToggleSelectEvent = (eventId) => {
@@ -533,21 +581,21 @@ function EventsTab({ user, accessToken }) {
       return
     }
 
-    let approvedCount = 0
+    const results = []
 
     const selectedEntries = getVisibleEventEntries().filter((entry) => selectedEventIds.includes(entry.entryId))
 
     for (const entry of selectedEntries) {
-      const pendingEventIds = entry.events.filter((event) => event.status !== 'booked').map((event) => event.id)
+      const pendingEventIds = entry.events.filter((event) => !isApprovedEvent(event)).map((event) => event.id)
       if (pendingEventIds.length === 0) {
         continue
       }
 
       for (const eventId of pendingEventIds) {
         try {
-          const approved = await handleAdminApproveEvent(eventId, { silent: true })
-          if (approved) {
-            approvedCount += 1
+          const result = await handleAdminApproveEvent(eventId, { silent: true })
+          if (result) {
+            results.push(result)
           }
         } catch (error) {
           console.error(`Failed to approve event ${eventId}:`, error)
@@ -555,7 +603,7 @@ function EventsTab({ user, accessToken }) {
       }
     }
 
-    alert(`Approved ${approvedCount} event${approvedCount === 1 ? '' : 's'} successfully.`)
+    alert(results.length === 0 ? 'No pending events were approved.' : summarizeApprovals(results))
   }
 
   const handleHideSelectedEvents = async () => {
@@ -602,6 +650,8 @@ function EventsTab({ user, accessToken }) {
 
   const visibleEventEntries = getVisibleEventEntries();
   const conflictingIds = getConflictingEventIds();
+  const eventsMissingFromCalendar = events.filter(isMissingFromCalendar);
+  const eventsHiddenFromWebsite = events.filter(isHiddenFromWebsite);
 
   return (
     <div className="events-tab">
@@ -611,6 +661,49 @@ function EventsTab({ user, accessToken }) {
           {showForm ? 'Cancel' : editingEvent ? 'Cancel Edit' : 'Create Event'}
         </button>
       </div>
+
+      {!accessToken && (
+        <div className="google-connect-banner">
+          <p>
+            Google Calendar is not connected, so approving an event will publish it to the
+            website but <strong>not</strong> add it to the calendar. Connect to keep both in sync.
+          </p>
+          <button onClick={connectGoogleCalendar} disabled={connectingGoogle}>
+            {connectingGoogle ? 'Connecting...' : 'Connect Google Calendar'}
+          </button>
+        </div>
+      )}
+
+      {eventsHiddenFromWebsite.length > 0 && (
+        <div className="calendar-sync-banner">
+          <p>
+            <strong>
+              {eventsHiddenFromWebsite.length} approved event
+              {eventsHiddenFromWebsite.length === 1 ? ' is' : 's are'} hidden from the website.
+            </strong>{' '}
+            They were approved before approval started publishing automatically.
+          </p>
+          <button onClick={handlePublishHiddenEvents} disabled={publishingWebsite}>
+            {publishingWebsite ? 'Publishing...' : `Publish ${eventsHiddenFromWebsite.length} to the website`}
+          </button>
+        </div>
+      )}
+
+      {eventsMissingFromCalendar.length > 0 && (
+        <div className="calendar-sync-banner">
+          <p>
+            <strong>
+              {eventsMissingFromCalendar.length} approved event
+              {eventsMissingFromCalendar.length === 1 ? ' is' : 's are'} not on Google Calendar.
+            </strong>{' '}
+            They are live on the website but missing from the calendar — most likely approved while
+            Google was disconnected.
+          </p>
+          <button onClick={handleSyncMissingCalendarEvents} disabled={syncingCalendar || !accessToken}>
+            {syncingCalendar ? 'Syncing...' : `Add ${eventsMissingFromCalendar.length} to Google Calendar`}
+          </button>
+        </div>
+      )}
 
       {generatedLink && (
         <div className="link-modal">
@@ -812,9 +905,35 @@ function EventsTab({ user, accessToken }) {
 
       <div className="events-list">
         {events.length > 0 && (
-          // ...existing code...
           <div className="bulk-actions-bar">
-            {/* ...existing code... */}
+            <label className="event-select-checkbox">
+              <input
+                type="checkbox"
+                checked={
+                  visibleEventEntries.length > 0 &&
+                  visibleEventEntries.every((entry) => selectedEventIds.includes(entry.entryId))
+                }
+                onChange={handleToggleSelectAllPending}
+              />
+              Select all
+            </label>
+            <span className="bulk-selection-count">
+              {selectedEventIds.length} selected
+            </span>
+            <button onClick={handleApproveSelectedEvents} disabled={selectedEventIds.length === 0}>
+              Approve Selected
+            </button>
+            <button onClick={handleHideSelectedEvents} disabled={selectedEventIds.length === 0}>
+              Hide Selected
+            </button>
+            <label className="event-select-checkbox">
+              <input
+                type="checkbox"
+                checked={showHiddenEvents}
+                onChange={(e) => setShowHiddenEvents(e.target.checked)}
+              />
+              Show hidden events
+            </label>
           </div>
         )}
 
@@ -841,7 +960,8 @@ function EventsTab({ user, accessToken }) {
                         &#9888;
                       </span>
                     )}
-                    {entry.status === 'booked' && <span style={{ color: '#27ae60', fontSize: '0.9rem' }}>(Booked)</span>}
+                    {entry.status === 'booked' && <span style={{ color: '#27ae60', fontSize: '0.9rem' }}>(Approved)</span>}
+                    {entry.status === 'rejected' && <span style={{ color: '#e74c3c', fontSize: '0.9rem' }}>(Rejected)</span>}
                     {entry.status === 'partial' && <span style={{ color: '#f39c12', fontSize: '0.9rem' }}>(Partially Booked)</span>}
                     {entry.isSeries && <span style={{ color: '#667eea', fontSize: '0.9rem' }}>({entry.events.length} in series)</span>}
                   </h3>
@@ -852,14 +972,51 @@ function EventsTab({ user, accessToken }) {
                     : `${entry.representative.date} ${formatTime12Hour(entry.representative.startTime)} - ${formatTime12Hour(entry.representative.endTime)}`}
                 </p>
                 <p>{entry.representative.description}</p>
+                {entry.status === 'booked' && (
+                  <div className="event-destinations">
+                    <span className={entry.publishedToWebsite ? 'destination-ok' : 'destination-missing'}>
+                      {entry.publishedToWebsite ? 'On website' : 'Hidden from website'}
+                    </span>
+                    <span className={entry.missingFromCalendar ? 'destination-missing' : 'destination-ok'}>
+                      {entry.missingFromCalendar ? 'Not on Google Calendar' : 'On Google Calendar'}
+                    </span>
+                  </div>
+                )}
                 <div className="event-actions" onClick={e => e.stopPropagation()}>
+                  {entry.missingFromCalendar && (
+                    <button
+                      onClick={async () => {
+                        if (!accessToken) {
+                          alert('Connect Google Calendar first.')
+                          return
+                        }
+                        const failures = []
+                        for (const event of entry.events.filter(isMissingFromCalendar)) {
+                          try {
+                            const updates = await syncEventToCalendar(event, accessToken)
+                            setEvents((previousEvents) =>
+                              previousEvents.map((item) => (item.id === event.id ? { ...item, ...updates } : item))
+                            )
+                          } catch (err) {
+                            console.error(`Failed to sync event ${event.id}:`, err)
+                            failures.push(err?.message || 'unknown error')
+                          }
+                        }
+                        alert(failures.length === 0 ? 'Added to Google Calendar.' : `Failed: ${failures[0]}`)
+                      }}
+                    >
+                      Add to Calendar
+                    </button>
+                  )}
                   <button onClick={() => handleEditEvent(entry.representative)}>Edit</button>
                   <button
                     onClick={async () => {
+                      const results = []
                       for (const eventId of entry.eventIds) {
-                        await handleAdminApproveEvent(eventId, { silent: true })
+                        const result = await handleAdminApproveEvent(eventId, { silent: true })
+                        if (result) results.push(result)
                       }
-                      alert(entry.isSeries ? 'Recurring series approved.' : 'Event approved directly by admin!')
+                      alert(results.length === 0 ? 'Nothing to approve.' : summarizeApprovals(results))
                     }}
                     disabled={entry.status === 'booked'}
                   >

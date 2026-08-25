@@ -33,8 +33,16 @@ function Dashboard({ user, googleAccessToken, setGoogleAccessToken }) {
         </div>
       </div>
       <div className="tab-content">
-        {activeTab === 'events' && <EventsTab user={user} accessToken={googleAccessToken} />}
-        {activeTab === 'bookings' && <BookingsTab accessToken={googleAccessToken} />}
+        {activeTab === 'events' && (
+          <EventsTab
+            user={user}
+            accessToken={googleAccessToken}
+            setAccessToken={setGoogleAccessToken}
+          />
+        )}
+        {activeTab === 'bookings' && (
+          <BookingsTab accessToken={googleAccessToken} setAccessToken={setGoogleAccessToken} />
+        )}
         {activeTab === 'calendar' && <CalendarTab accessToken={googleAccessToken} />}
         {activeTab === 'staff' && (
           <StaffTab
