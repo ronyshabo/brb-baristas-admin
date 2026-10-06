@@ -3,6 +3,12 @@
  *
  * Baristas are 1099 contractors — StaffTab already works to the 1099-NEC
  * threshold — so nothing is withheld. Tax here is a set-aside estimate.
+ *
+ * A statement is defined by a plain date range. There is deliberately no
+ * "which date does this week belong to" setting: a saved report carries a real
+ * span (weekStart..weekEnd), so a week is simply in or out depending on whether
+ * it OVERLAPS the range. Weeks are counted whole, because the saved earnings are
+ * weekly totals with no per-day breakdown to split.
  */
 
 // Self-employment tax: 15.3% (12.4% Social Security + 2.9% Medicare) charged on
@@ -20,6 +26,12 @@ export const TAX_1099_THRESHOLD = 600
 const pad = (n) => String(n).padStart(2, '0')
 export const toKey = (d) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`
 
+const shift = (key, days) => {
+  const [y, m, d] = key.split('-').map(Number)
+  const date = new Date(y, m - 1, d + days)
+  return toKey(date)
+}
+
 /** Weeks here start Sunday, matching getSundayOfWeek in StaffTab. */
 export function sundayOf(date) {
   const d = new Date(date)
@@ -28,11 +40,18 @@ export function sundayOf(date) {
   return d
 }
 
-/** Inclusive [from, to] date-key window for a preset. `today` is injectable for tests. */
-export function windowFor(preset, custom = {}, today = new Date()) {
+/** A report's inclusive span. weekEnd is saved as weekStart + 6; derive it if absent. */
+export function spanOf(report) {
+  const start = report.weekStart || report.weekEnd || ''
+  if (!start) return null
+  const end = report.weekEnd || shift(start, 6)
+  return { start, end }
+}
+
+/** Quick-fill ranges. `today` is injectable for tests. */
+export function rangeFor(preset, today = new Date()) {
   const base = new Date(today)
   base.setHours(0, 0, 0, 0)
-  const monthLabel = (d) => d.toLocaleString('en-US', { month: 'long', year: 'numeric' })
 
   switch (preset) {
     case 'thisWeek':
@@ -41,33 +60,32 @@ export function windowFor(preset, custom = {}, today = new Date()) {
       if (preset === 'lastWeek') from.setDate(from.getDate() - 7)
       const to = new Date(from)
       to.setDate(to.getDate() + 6)
-      return { from: toKey(from), to: toKey(to), label: `Week of ${toKey(from)}` }
+      return { from: toKey(from), to: toKey(to) }
     }
-    case 'thisMonth': {
-      const from = new Date(base.getFullYear(), base.getMonth(), 1)
-      const to = new Date(base.getFullYear(), base.getMonth() + 1, 0)
-      return { from: toKey(from), to: toKey(to), label: monthLabel(from) }
-    }
-    case 'lastMonth': {
-      const from = new Date(base.getFullYear(), base.getMonth() - 1, 1)
-      const to = new Date(base.getFullYear(), base.getMonth(), 0)
-      return { from: toKey(from), to: toKey(to), label: monthLabel(from) }
-    }
-    case 'custom':
+    case 'thisMonth':
       return {
-        from: custom.from || '0000-01-01',
-        to: custom.to || '9999-12-31',
-        label: custom.from && custom.to ? `${custom.from} to ${custom.to}` : 'Custom range',
+        from: toKey(new Date(base.getFullYear(), base.getMonth(), 1)),
+        to: toKey(new Date(base.getFullYear(), base.getMonth() + 1, 0)),
       }
+    case 'lastMonth':
+      return {
+        from: toKey(new Date(base.getFullYear(), base.getMonth() - 1, 1)),
+        to: toKey(new Date(base.getFullYear(), base.getMonth(), 0)),
+      }
+    case 'thisYear':
+      return { from: `${base.getFullYear()}-01-01`, to: `${base.getFullYear()}-12-31` }
     case 'ever':
     default:
-      return { from: '0000-01-01', to: '9999-12-31', label: 'All time' }
+      return { from: '', to: '' }
   }
 }
 
-/** Which date a weekly report is filed under. */
-export const periodKey = (report, basis = 'weekStart') =>
-  (basis === 'weekEnd' ? report.weekEnd || report.weekStart : report.weekStart || report.weekEnd) || ''
+export function rangeLabel({ from, to }) {
+  if (!from && !to) return 'All time'
+  if (from && !to) return `${from} onwards`
+  if (!from && to) return `up to ${to}`
+  return `${from} to ${to}`
+}
 
 /** Every name that appears in the roster or in any saved report. */
 export function namesFrom(baristas = [], reports = []) {
@@ -76,11 +94,19 @@ export function namesFrom(baristas = [], reports = []) {
   return [...set].sort((a, b) => a.localeCompare(b))
 }
 
+/** Does a report's week overlap the range? Empty bounds are open-ended. */
+export function overlaps(report, { from, to }) {
+  const span = spanOf(report)
+  if (!span) return false
+  if (from && span.end < from) return false
+  if (to && span.start > to) return false
+  return true
+}
+
 export function computeStatement({
   reports = [],
   name,
-  window: win,
-  basis = 'weekStart',
+  range = { from: '', to: '' },
   includeSE = true,
   incomeRate = DEFAULT_INCOME_TAX_RATE,
   year = String(new Date().getFullYear()),
@@ -88,11 +114,8 @@ export function computeStatement({
   if (!name) return null
 
   const weeks = reports
-    .filter((r) => {
-      const key = periodKey(r, basis)
-      return key && key >= win.from && key <= win.to && (r.earnings || {})[name]
-    })
-    .sort((a, b) => periodKey(a, basis).localeCompare(periodKey(b, basis)))
+    .filter((r) => (r.earnings || {})[name] && overlaps(r, range))
+    .sort((a, b) => (spanOf(a)?.start || '').localeCompare(spanOf(b)?.start || ''))
 
   const totals = weeks.reduce(
     (acc, r) => {
@@ -111,9 +134,14 @@ export function computeStatement({
   const incomeTax = gross * ((Number(incomeRate) || 0) / 100)
   const taxSetAside = seTax + incomeTax
 
-  // The 1099 threshold is a calendar-year question, so it ignores the window.
+  // The 1099 threshold is a calendar-year question, so it ignores the range. A
+  // week counts toward the year it FINISHED in, so each week lands in exactly
+  // one year rather than being counted twice across New Year.
   const ytd = reports
-    .filter((r) => periodKey(r, basis).slice(0, 4) === year && (r.earnings || {})[name])
+    .filter((r) => {
+      const span = spanOf(r)
+      return span && span.end.slice(0, 4) === year && (r.earnings || {})[name]
+    })
     .reduce((sum, r) => {
       const e = r.earnings[name]
       return sum + (Number(e.basePay) || 0) + (Number(e.tips) || 0)

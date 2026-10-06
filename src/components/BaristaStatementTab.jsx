@@ -1,6 +1,6 @@
 import { useState, useMemo } from 'react'
 import {
-  windowFor, computeStatement, namesFrom, periodKey,
+  rangeFor, rangeLabel, computeStatement, namesFrom, spanOf,
   DEFAULT_INCOME_TAX_RATE,
 } from '../lib/statement'
 import '../styles/BaristaStatement.css'
@@ -19,9 +19,9 @@ const money = (v) => `$${(Number(v) || 0).toFixed(2)}`
 
 function BaristaStatementTab({ baristas, reports }) {
   const [name, setName] = useState('')
-  const [preset, setPreset] = useState('thisMonth')
-  const [custom, setCustom] = useState({ from: '', to: '' })
-  const [basis, setBasis] = useState('weekStart')
+  // One concept: a date range. The quick-fill buttons just write into it, so
+  // what's being counted is always visible rather than implied by a preset.
+  const [range, setRange] = useState(() => rangeFor('lastMonth'))
   const [incomeRate, setIncomeRate] = useState(DEFAULT_INCOME_TAX_RATE)
   const [includeSE, setIncludeSE] = useState(true)
   const [copied, setCopied] = useState(false)
@@ -30,12 +30,15 @@ function BaristaStatementTab({ baristas, reports }) {
   // have a statement you can produce.
   const names = useMemo(() => namesFrom(baristas, reports), [baristas, reports])
 
-  const win = useMemo(() => windowFor(preset, custom), [preset, custom.from, custom.to])
-  const keyOf = (r) => periodKey(r, basis)
+  const label = rangeLabel(range)
+  const spanText = (r) => {
+    const s = spanOf(r)
+    return s ? `${s.start} → ${s.end}` : '—'
+  }
 
   const statement = useMemo(
-    () => computeStatement({ reports, name, window: win, basis, includeSE, incomeRate }),
-    [reports, name, win, basis, includeSE, incomeRate]
+    () => computeStatement({ reports, name, range, includeSE, incomeRate }),
+    [reports, name, range.from, range.to, includeSE, incomeRate]
   )
 
   const statementText = () => {
@@ -43,7 +46,7 @@ function BaristaStatementTab({ baristas, reports }) {
     const L = []
     L.push('*BRB Earnings Statement*')
     L.push(`*${name}*`)
-    L.push(`*Period:* ${win.label}`)
+    L.push(`*Period:* ${label}`)
     L.push('')
     L.push(`Shifts: ${statement.totals.shifts}  |  Hours: ${statement.totals.hours.toFixed(1)}`)
     L.push(`Base pay: ${money(statement.totals.basePay)}`)
@@ -93,7 +96,7 @@ function BaristaStatementTab({ baristas, reports }) {
     statement.weeks.forEach((r) => {
       const e = r.earnings[name]
       rows.push([
-        keyOf(r), e.shifts || 0, (Number(e.hours) || 0).toFixed(2),
+        spanText(r), e.shifts || 0, (Number(e.hours) || 0).toFixed(2),
         (Number(e.basePay) || 0).toFixed(2), (Number(e.tips) || 0).toFixed(2),
         ((Number(e.basePay) || 0) + (Number(e.tips) || 0)).toFixed(2),
       ])
@@ -110,7 +113,7 @@ function BaristaStatementTab({ baristas, reports }) {
     const url = URL.createObjectURL(new Blob([csv], { type: 'text/csv' }))
     const a = document.createElement('a')
     a.href = url
-    a.download = `brb-${name.toLowerCase().replace(/\s+/g, '-')}-${win.from}-to-${win.to}.csv`
+    a.download = `brb-${name.toLowerCase().replace(/\s+/g, '-')}-${range.from || 'start'}-to-${range.to || 'end'}.csv`
     a.click()
     URL.revokeObjectURL(url)
   }
@@ -127,39 +130,31 @@ function BaristaStatementTab({ baristas, reports }) {
         </div>
 
         <div className="form-group">
-          <label>Period</label>
-          <select value={preset} onChange={(e) => setPreset(e.target.value)}>
-            <option value="ever">Ever (all time)</option>
-            <option value="thisMonth">This month</option>
-            <option value="lastMonth">Last month</option>
-            <option value="thisWeek">This week</option>
-            <option value="lastWeek">Last week</option>
-            <option value="custom">Custom range…</option>
-          </select>
+          <label>From</label>
+          <input type="date" value={range.from}
+            onChange={(e) => setRange({ ...range, from: e.target.value })} />
         </div>
-
-        {preset === 'custom' && (
-          <>
-            <div className="form-group">
-              <label>From</label>
-              <input type="date" value={custom.from}
-                onChange={(e) => setCustom({ ...custom, from: e.target.value })} />
-            </div>
-            <div className="form-group">
-              <label>To</label>
-              <input type="date" value={custom.to}
-                onChange={(e) => setCustom({ ...custom, to: e.target.value })} />
-            </div>
-          </>
-        )}
-
         <div className="form-group">
-          <label>Attribute week by</label>
-          <select value={basis} onChange={(e) => setBasis(e.target.value)}>
-            <option value="weekStart">Week start date</option>
-            <option value="weekEnd">Week end date</option>
-          </select>
+          <label>To</label>
+          <input type="date" value={range.to}
+            onChange={(e) => setRange({ ...range, to: e.target.value })} />
         </div>
+      </div>
+
+      <div className="quick-ranges">
+        <span>Jump to</span>
+        {[
+          ['thisWeek', 'This week'],
+          ['lastWeek', 'Last week'],
+          ['thisMonth', 'This month'],
+          ['lastMonth', 'Last month'],
+          ['thisYear', 'This year'],
+          ['ever', 'Ever'],
+        ].map(([preset, text]) => (
+          <button key={preset} type="button" onClick={() => setRange(rangeFor(preset))}>
+            {text}
+          </button>
+        ))}
       </div>
 
       <div className="tax-controls">
@@ -180,7 +175,7 @@ function BaristaStatementTab({ baristas, reports }) {
 
       {name && statement && statement.weeks.length === 0 && (
         <p className="empty-state">
-          No saved tip reports for <b>{name}</b> in {win.label.toLowerCase()}.
+          No saved tip reports for <b>{name}</b> in {label.toLowerCase()}.
         </p>
       )}
 
@@ -188,7 +183,7 @@ function BaristaStatementTab({ baristas, reports }) {
         <>
           <div className="statement-card">
             <h3>{name}</h3>
-            <p className="period">{win.label} · {statement.weeks.length} week{statement.weeks.length === 1 ? '' : 's'}</p>
+            <p className="period">{label} · {statement.weeks.length} week{statement.weeks.length === 1 ? '' : 's'}</p>
 
             <table className="statement-table">
               <tbody>
@@ -223,8 +218,13 @@ function BaristaStatementTab({ baristas, reports }) {
             </p>
 
             <p className="disclaimer">
-              An estimate to help them set money aside, not tax advice. Actual liability
-              depends on their other income, filing status and deductions.
+              Weeks are counted whole — a week that overlaps your dates is included in
+              full, because saved reports hold weekly totals with no per-day split. The
+              breakdown below shows exactly which weeks these numbers came from.
+            </p>
+            <p className="disclaimer">
+              The tax figure is an estimate to help them set money aside, not tax advice.
+              Actual liability depends on their other income, filing status and deductions.
             </p>
           </div>
 
@@ -238,8 +238,8 @@ function BaristaStatementTab({ baristas, reports }) {
                 {statement.weeks.map((r) => {
                   const e = r.earnings[name]
                   return (
-                    <tr key={r.id || keyOf(r)}>
-                      <td>{keyOf(r)}</td>
+                    <tr key={r.id || spanText(r)}>
+                      <td>{spanText(r)}</td>
                       <td>{e.shifts || 0}</td>
                       <td>{(Number(e.hours) || 0).toFixed(1)}</td>
                       <td>{money(e.basePay)}</td>
