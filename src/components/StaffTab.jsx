@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react'
 import { collection, addDoc, getDocs, query, orderBy, doc, updateDoc, deleteDoc, setDoc } from 'firebase/firestore'
 import { db } from '../firebase/config'
 import { signInWithGoogleCalendar, clearGoogleToken } from '../firebase/googleAuth'
+import BaristaStatementTab from './BaristaStatementTab'
 import '../styles/StaffTab.css'
 
 // A person paid $600+ in a calendar year needs a 1099-NEC (non-employee comp).
@@ -15,7 +16,7 @@ const INTER_MORNING_OVERLAP = 2 // the 12pm - 2pm part of an inter-shift
 const INTER_EVENING_OVERLAP = 4 // the 2pm - 6pm part of an inter-shift
 
 function StaffTab({ user, accessToken, setAccessToken }) {
-  const [view, setView] = useState('calculator') // calculator, reports, baristas
+  const [view, setView] = useState('calculator') // calculator, baristas, reports, statements
   const [baristas, setBaristas] = useState([])
   const [selectedWeek, setSelectedWeek] = useState('')
   const [tipInputMethod, setTipInputMethod] = useState('byHour') // byHour, bulk, manual
@@ -1150,6 +1151,9 @@ function StaffTab({ user, accessToken, setAccessToken }) {
           <button onClick={() => setView('baristas')} className={view === 'baristas' ? 'active' : ''}>
             Manage Baristas
           </button>
+          <button onClick={() => setView('statements')} className={view === 'statements' ? 'active' : ''}>
+            Barista Statements
+          </button>
           <button onClick={() => setView('reports')} className={view === 'reports' ? 'active' : ''}>
             Reports
           </button>
@@ -1442,6 +1446,10 @@ function StaffTab({ user, accessToken, setAccessToken }) {
             )}
           </div>
         </div>
+      )}
+
+      {view === 'statements' && (
+        <BaristaStatementTab baristas={baristas} reports={reports} />
       )}
 
       {view === 'reports' && (

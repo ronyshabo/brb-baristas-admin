@@ -1,0 +1,64 @@
+.statement-section { display: flex; flex-direction: column; gap: 16px; }
+
+.statement-controls {
+  display: flex; gap: 12px; flex-wrap: wrap; align-items: flex-end;
+}
+.statement-controls .form-group { display: flex; flex-direction: column; gap: 4px; min-width: 160px; }
+.statement-controls label { font-size: 12px; font-weight: 600; color: #4a4a4a; }
+.statement-controls select,
+.statement-controls input { padding: 8px 10px; font: inherit; }
+
+.tax-controls {
+  display: flex; gap: 20px; flex-wrap: wrap; align-items: center;
+  padding: 12px 14px; background: #f7f7f7; border: 1px solid #dfdfdf;
+}
+.tax-controls .check { display: flex; align-items: center; gap: 8px; font-size: 13.5px; }
+.tax-controls .rate { display: flex; align-items: center; gap: 8px; font-size: 13.5px; }
+.tax-controls .rate input { width: 64px; padding: 6px 8px; font: inherit; }
+
+.statement-card {
+  background: #fff; border: 2px solid #404040; padding: 18px 20px;
+}
+.statement-card h3 { margin: 0; font-size: 20px; }
+.statement-card h4 {
+  margin: 20px 0 8px; font-size: 13px; text-transform: uppercase;
+  letter-spacing: .06em; color: #4a4a4a;
+}
+.statement-card .period { margin: 4px 0 14px; color: #666; font-size: 13.5px; }
+
+table.statement-table { width: 100%; border-collapse: collapse; }
+table.statement-table th,
+table.statement-table td {
+  text-align: left; padding: 7px 0; border-bottom: 1px solid #ececec; font-size: 14px;
+}
+table.statement-table th { font-weight: 500; color: #333; }
+table.statement-table td { text-align: right; font-variant-numeric: tabular-nums; }
+table.statement-table tr.total th,
+table.statement-table tr.total td {
+  font-weight: 700; border-top: 2px solid #404040; border-bottom: none; font-size: 15px;
+}
+
+.statement-card .ten99 {
+  margin: 16px 0 0; padding: 10px 12px; font-size: 13.5px;
+  background: #f0f7f0; border-left: 4px solid #3a7a4a;
+}
+.statement-card .ten99.over { background: #fff7ec; border-left-color: #d97706; }
+
+.statement-card .disclaimer {
+  margin: 12px 0 0; font-size: 12.5px; color: #666; line-height: 1.5;
+}
+
+.week-breakdown summary { cursor: pointer; font-size: 13.5px; font-weight: 600; }
+table.statement-table.breakdown { margin-top: 10px; }
+table.statement-table.breakdown thead th {
+  font-weight: 700; font-size: 12px; text-transform: uppercase; letter-spacing: .04em;
+  border-bottom: 2px solid #404040;
+}
+table.statement-table.breakdown thead th:not(:first-child) { text-align: right; }
+table.statement-table.breakdown td:first-child { text-align: left; }
+
+@media (max-width: 640px) {
+  .statement-controls .form-group { min-width: 100%; }
+  .tax-controls { flex-direction: column; align-items: flex-start; gap: 10px; }
+  table.statement-table.breakdown { font-size: 12.5px; }
+}
