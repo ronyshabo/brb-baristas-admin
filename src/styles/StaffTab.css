@@ -951,3 +951,18 @@
     flex-direction: column;
   }
 }
+
+/* The year-end tax panel collapses — it is a lot of tables, and the saved
+   reports below it were otherwise a long scroll away. */
+.tax-panel-toggle {
+  display: flex; align-items: center; gap: 10px; width: 100%;
+  background: none; border: none; padding: 0; margin: 0;
+  cursor: pointer; text-align: left; font: inherit; color: inherit;
+}
+.tax-panel-toggle h3 { margin: 0; }
+.tax-panel-toggle .chevron { font-size: 13px; color: #666; width: 12px; }
+.tax-panel-toggle:hover h3 { text-decoration: underline; }
+.tax-panel-toggle .tax-panel-hint {
+  margin-left: auto; font-size: 12px; color: #3a7a4a; font-weight: 600;
+}
+.tax-panel.collapsed { padding-bottom: 12px; }

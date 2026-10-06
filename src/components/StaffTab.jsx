@@ -39,6 +39,9 @@ function StaffTab({ user, accessToken, setAccessToken }) {
   const [taxBasis, setTaxBasis] = useState('weekStart')
   const [taxSummary, setTaxSummary] = useState(null)
   const [taxStatementText, setTaxStatementText] = useState('')
+  // Collapsed by default: this panel is ~200 lines of tables, and the saved
+  // reports underneath it were a long scroll away.
+  const [taxPanelOpen, setTaxPanelOpen] = useState(false)
 
   const calendarId = import.meta.env.VITE_GOOGLE_CALENDAR_ID
 
@@ -895,6 +898,7 @@ function StaffTab({ user, accessToken, setAccessToken }) {
   )].sort().reverse()
 
   const generateTaxSummary = () => {
+    setTaxPanelOpen(true)
     const year = String(taxYear)
     const yearReports = reports
       .filter(report => getPeriodKey(report, taxBasis).slice(0, 4) === year)
@@ -1454,8 +1458,21 @@ function StaffTab({ user, accessToken, setAccessToken }) {
 
       {view === 'reports' && (
         <div className="reports-section">
-          <div className="tax-panel">
-            <h3>Year-End Tax Summary</h3>
+          <div className={`tax-panel${taxPanelOpen ? '' : ' collapsed'}`}>
+            <button
+              type="button"
+              className="tax-panel-toggle"
+              onClick={() => setTaxPanelOpen((open) => !open)}
+              aria-expanded={taxPanelOpen}
+            >
+              <span className="chevron" aria-hidden="true">{taxPanelOpen ? '▾' : '▸'}</span>
+              <h3>Year-End Tax Summary</h3>
+              {!taxPanelOpen && taxSummary && (
+                <span className="tax-panel-hint">{taxSummary.year} calculated</span>
+              )}
+            </button>
+
+            {taxPanelOpen && (<>
             <p className="tax-panel-description">
               Rolls every saved weekly tip report into per-person totals for the year:
               base pay (what a barista earns before tips), tips paid out, and gross earnings.
@@ -1672,6 +1689,7 @@ function StaffTab({ user, accessToken, setAccessToken }) {
                 </p>
               </div>
             )}
+            </>)}
           </div>
 
           <h3>Saved Reports</h3>
