@@ -116,7 +116,7 @@ export const lineText = (line, packs) => {
   const { packLabel, unit, name } = line.item
   const need = `need ${quantity(line.shortfall, unit)}`
   const units = packs * line.packSize
-  const buy = `buy ${packs} ${plural(packs, packLabel || unit)}${line.packSize > 1 ? ` (${units})` : ''}`
+  const buy = `buy ${quantity(packs, packLabel || unit)}${line.packSize > 1 ? ` (${units})` : ''}`
   return `${name} — ${need} → ${buy}`
 }
 
