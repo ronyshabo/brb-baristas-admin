@@ -4,6 +4,7 @@ import StaffTab from '../components/StaffTab'
 import BookingsTab from '../components/BookingsTab'
 import CalendarTab from '../components/CalendarTab'
 import WebsiteContentTab from '../components/WebsiteContentTab'
+import InventoryTab from '../inventory/InventoryTab'
 import '../styles/Dashboard.css'
 
 function Dashboard({ user, googleAccessToken, setGoogleAccessToken }) {
@@ -15,6 +16,7 @@ function Dashboard({ user, googleAccessToken, setGoogleAccessToken }) {
     { id: 'calendar', label: 'Calendar' },
     { id: 'staff', label: 'Staff Management' },
     { id: 'websiteContent', label: 'Website Content' },
+    { id: 'inventory', label: 'Inventory' },
   ]
 
   return (
@@ -52,6 +54,7 @@ function Dashboard({ user, googleAccessToken, setGoogleAccessToken }) {
           />
         )}
         {activeTab === 'websiteContent' && <WebsiteContentTab user={user} />}
+        {activeTab === 'inventory' && <InventoryTab />}
       </div>
     </div>
   )
