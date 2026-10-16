@@ -69,13 +69,13 @@ export const sortCategories = (categories) => [...categories].sort((a, b) => (a.
 
 export const categoryNameOf = (item, categoriesById) => categoriesById.get(item.categoryId)?.name || UNCATEGORIZED
 
-// Group items by category in the admin's chosen order (sortOrder), with
-// uncategorized items last.
-export const groupByCategory = (items, categories) => {
+// Group items (or anything with an item — pass `getItem`) by category in the
+// admin's chosen order (sortOrder), with uncategorized items last.
+export const groupByCategory = (items, categories, getItem = (entry) => entry) => {
   const groups = sortCategories(categories).map((category) => ({ categoryId: category.id, category: category.name, entries: [] }))
   const byId = new Map(groups.map((group) => [group.categoryId, group]))
   const loose = { categoryId: null, category: UNCATEGORIZED, entries: [] }
-  for (const item of items) (byId.get(item.categoryId) || loose).entries.push(item)
+  for (const entry of items) (byId.get(getItem(entry).categoryId) || loose).entries.push(entry)
   return [...groups, loose].filter((group) => group.entries.length > 0)
 }
 
@@ -87,7 +87,8 @@ export const buildReport = (items, sources = [], now = Date.now()) => {
     toOrder: toOrder.map(({ entries, ...group }) => ({ ...group, lines: entries.sort(byName) })),
     onOrder: lines.filter((entry) => entry.status === 'on-order').sort(byName),
     needsCheck: lines.filter((entry) => entry.status === 'check').sort(byName),
-    okCount: lines.filter((entry) => entry.status === 'ok').length,
+    // At or above par, counted recently, not flagged — hidden behind a dropdown in the report.
+    atPar: lines.filter((entry) => entry.status === 'ok').map((entry) => ({ ...entry, over: entry.onHand - entry.par })).sort(byName),
   }
 }
 
@@ -150,6 +151,7 @@ export const shoppingListText = (
   return `${out.join('\n')}\n`
 }
 
-// One source's section on its own — the per-card "Copy list" button.
+// One source's section on its own — the per-card "Copy list" button (which
+// passes a title naming the category when one category tab is selected).
 export const sourceListText = (group, options = {}) =>
-  shoppingListText({ toOrder: [group] }, { ...options, title: `BRB Coffee — ${group.source} order` })
+  shoppingListText({ toOrder: [group] }, { ...options, title: options.title ?? `BRB Coffee — ${group.source} order` })

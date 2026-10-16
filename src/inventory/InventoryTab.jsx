@@ -3,7 +3,7 @@
 // brb-baristas holds a copy (see README "Updating the admin tab").
 // All styles are scoped under .inv-admin.
 
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import {
   addCategory,
   addStarterCatalog,
@@ -27,7 +27,7 @@ import {
   STARTER_SOURCES,
   watchSources,
 } from './store'
-import { buildReport, NO_SOURCE, plural, shoppingListText, sortCategories, sourceListText, sourceNameOf, UNCATEGORIZED } from './order'
+import { buildReport, groupByCategory, NO_SOURCE, plural, shoppingListText, sortCategories, sourceListText, sourceNameOf, UNCATEGORIZED } from './order'
 import { timeAgo } from './time'
 import './InventoryTab.css'
 
@@ -69,14 +69,30 @@ const localDateStamp = (date = new Date()) =>
 
 // `packs` holds quantities the admin edited; it lives in OrderReport so the
 // shopping-list download uses the same numbers as the cards.
-function SourceCard({ source, notes, lines, packs, setPack }) {
+//
+// When a source's to-order items span several categories, the card gets
+// category tabs; Copy / Mark ordered then act on the visible tab only, so
+// e.g. an Odeko "Alt milks" order can go out on its own.
+const ALL_CATEGORIES = 'all'
+
+function SourceCard({ source, notes, lines, categories, packs, setPack }) {
+  const [tab, setTab] = useState(ALL_CATEGORIES)
   const packsFor = (line) => packs[line.item.id] ?? line.packs
+
+  const groups = groupByCategory(lines, categories, (line) => line.item)
+  const groupKey = (group) => group.categoryId ?? 'none'
+  const active = groups.find((group) => groupKey(group) === tab)
+  // Fall back to "All" once a tab empties out (e.g. everything in it got ordered).
+  const shownGroups = active ? [active] : groups
+  const shownLines = shownGroups.flatMap((group) => group.entries)
+  const showTabs = groups.length > 1
 
   const order = (line) => {
     const count = packsFor(line)
     if (count > 0) markOrdered(line.item.id, count, count * line.packSize)
   }
 
+  const listTitle = active ? `BRB Coffee — ${source} order (${active.category})` : undefined
 
   return (
     <section className="inv-admin-card">
@@ -86,10 +102,34 @@ function SourceCard({ source, notes, lines, packs, setPack }) {
           {notes && <p className="inv-admin-sub inv-admin-notes">{notes}</p>}
         </div>
         <div className="inv-admin-actions">
-          <CopyButton getText={() => sourceListText({ source, notes, lines }, { packsOverride: packs })} />
-          <button type="button" className="primary" onClick={() => lines.forEach(order)}>Mark all ordered</button>
+          <CopyButton
+            label={active ? `Copy ${active.category}` : 'Copy list'}
+            getText={() => sourceListText({ source, notes, lines: shownLines }, { packsOverride: packs, title: listTitle })}
+          />
+          <button type="button" className="primary" onClick={() => shownLines.forEach(order)}>
+            {active ? `Mark ${active.category} ordered` : 'Mark all ordered'}
+          </button>
         </div>
       </header>
+
+      {showTabs && (
+        <nav className="inv-admin-cat-tabs" aria-label={`${source} categories`}>
+          <button type="button" className={active ? '' : 'active'} onClick={() => setTab(ALL_CATEGORIES)}>
+            All <span>{lines.length}</span>
+          </button>
+          {groups.map((group) => (
+            <button
+              key={groupKey(group)}
+              type="button"
+              className={active && groupKey(active) === groupKey(group) ? 'active' : ''}
+              onClick={() => setTab(groupKey(group))}
+            >
+              {group.category} <span>{group.entries.length}</span>
+            </button>
+          ))}
+        </nav>
+      )}
+
       <div className="inv-admin-table-wrap">
         <table className="inv-admin-table">
           <thead>
@@ -102,52 +142,66 @@ function SourceCard({ source, notes, lines, packs, setPack }) {
               <th />
             </tr>
           </thead>
-          <tbody>
-            {lines.map((line) => {
-              const count = packsFor(line)
-              const { item } = line
-              return (
-                <tr key={item.id}>
-                  <td>
-                    <strong>{item.name}</strong>
-                    <div className="inv-admin-sub">
-                      {item.flag === 'out' && <span className="inv-admin-tag out">Out</span>}
-                      {item.flag === 'low' && <span className="inv-admin-tag low">Low</span>}
-                      {line.stale && <span className="inv-admin-tag stale">Old count</span>}
-                      counted {timeAgo(item.countedAt)}{item.countedBy ? ` by ${item.countedBy}` : ''}
-                    </div>
-                  </td>
-                  <td className="num">{line.onHand} <span className="inv-admin-unit">{item.unit}</span></td>
-                  <td className="num">{line.par}</td>
-                  <td className="num">{line.shortfall}</td>
-                  <td>
-                    <input
-                      className="inv-admin-packs"
-                      type="number"
-                      min="0"
-                      value={count}
-                      onChange={(event) => setPack(item.id, Math.max(0, Number(event.target.value) || 0))}
-                      aria-label={`${item.name} packs to order`}
-                    />
-                    {plural(count, item.packLabel || item.unit)}
-                    {line.packSize > 1 && <div className="inv-admin-sub">= {count * line.packSize} {plural(count * line.packSize, item.unit)}</div>}
-                  </td>
-                  <td>
-                    <button type="button" onClick={() => order(line)} disabled={count === 0}>Ordered</button>
-                  </td>
+          {shownGroups.map((group) => (
+            <tbody key={groupKey(group)}>
+              {/* Category headings only in the "All" view, and only when there's more than one. */}
+              {showTabs && !active && (
+                <tr className="inv-admin-cat-row">
+                  <th colSpan={6}>{group.category}</th>
                 </tr>
-              )
-            })}
-          </tbody>
+              )}
+              {group.entries.map((line) => {
+                const count = packsFor(line)
+                const { item } = line
+                return (
+                  <tr key={item.id}>
+                    <td>
+                      <strong>{item.name}</strong>
+                      <div className="inv-admin-sub">
+                        {item.flag === 'out' && <span className="inv-admin-tag out">Out</span>}
+                        {item.flag === 'low' && <span className="inv-admin-tag low">Low</span>}
+                        {line.stale && <span className="inv-admin-tag stale">Old count</span>}
+                        counted {timeAgo(item.countedAt)}{item.countedBy ? ` by ${item.countedBy}` : ''}
+                      </div>
+                    </td>
+                    <td className="num">{line.onHand} <span className="inv-admin-unit">{item.unit}</span></td>
+                    <td className="num">{line.par}</td>
+                    <td className="num">{line.shortfall}</td>
+                    <td>
+                      <input
+                        className="inv-admin-packs"
+                        type="number"
+                        min="0"
+                        value={count}
+                        onChange={(event) => setPack(item.id, Math.max(0, Number(event.target.value) || 0))}
+                        aria-label={`${item.name} packs to order`}
+                      />
+                      {plural(count, item.packLabel || item.unit)}
+                      {line.packSize > 1 && <div className="inv-admin-sub">= {count * line.packSize} {plural(count * line.packSize, item.unit)}</div>}
+                    </td>
+                    <td>
+                      <button type="button" onClick={() => order(line)} disabled={count === 0}>Ordered</button>
+                    </td>
+                  </tr>
+                )
+              })}
+            </tbody>
+          ))}
         </table>
       </div>
     </section>
   )
 }
 
-function OrderReport({ items, sources, openRequests, goToRequests }) {
+function OrderReport({ items, sources, categories, openRequests, goToRequests }) {
   const report = useMemo(() => buildReport(items, sources), [items, sources])
   const sourcesById = useMemo(() => new Map(sources.map((source) => [source.id, source])), [sources])
+  const [showAtPar, setShowAtPar] = useState(false)
+  const atParRef = useRef(null)
+  const openAtPar = () => {
+    setShowAtPar(true)
+    requestAnimationFrame(() => atParRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }))
+  }
   const lineCount = report.toOrder.reduce((sum, group) => sum + group.lines.length, 0)
   const [packs, setPacks] = useState({})
   const setPack = (itemId, count) => setPacks((current) => ({ ...current, [itemId]: count }))
@@ -163,7 +217,9 @@ function OrderReport({ items, sources, openRequests, goToRequests }) {
         <div><strong>{report.toOrder.length}</strong> {plural(report.toOrder.length, 'source')}</div>
         <div><strong>{report.onOrder.length}</strong> on order</div>
         <div><strong>{report.needsCheck.length}</strong> need a look</div>
-        <div><strong>{report.okCount}</strong> at par</div>
+        <button type="button" className="inv-admin-stat-link" onClick={openAtPar} disabled={report.atPar.length === 0}>
+          <strong>{report.atPar.length}</strong> at par
+        </button>
         <span className="inv-admin-stats-actions">
           <CopyButton getText={listText} label="Copy shopping list" disabled={nothingToList} />
           <button type="button" className="primary" onClick={downloadList} disabled={nothingToList}>
@@ -185,6 +241,7 @@ function OrderReport({ items, sources, openRequests, goToRequests }) {
           source={group.source}
           notes={group.notes}
           lines={group.lines}
+          categories={categories}
           packs={packs}
           setPack={setPack}
         />
@@ -224,6 +281,49 @@ function OrderReport({ items, sources, openRequests, goToRequests }) {
             ))}
           </ul>
         </section>
+      )}
+
+      {report.atPar.length > 0 && (
+        <details
+          ref={atParRef}
+          className="inv-admin-card inv-admin-atpar"
+          open={showAtPar}
+          onToggle={(event) => setShowAtPar(event.currentTarget.open)}
+        >
+          <summary>
+            <h3>At or above par</h3>
+            <span className="inv-admin-sub">
+              {report.atPar.length} {plural(report.atPar.length, 'item')} — nothing to order
+            </span>
+          </summary>
+          <div className="inv-admin-table-wrap">
+            <table className="inv-admin-table">
+              <thead>
+                <tr>
+                  <th>Item</th>
+                  <th>Source</th>
+                  <th className="num">On hand</th>
+                  <th className="num">Par</th>
+                  <th className="num">Over</th>
+                </tr>
+              </thead>
+              <tbody>
+                {report.atPar.map((line) => (
+                  <tr key={line.item.id}>
+                    <td>
+                      <strong>{line.item.name}</strong>
+                      <div className="inv-admin-sub">counted {timeAgo(line.item.countedAt)}{line.item.countedBy ? ` by ${line.item.countedBy}` : ''}</div>
+                    </td>
+                    <td>{sourceNameOf(line.item, sourcesById)}</td>
+                    <td className="num">{line.onHand} <span className="inv-admin-unit">{line.item.unit}</span></td>
+                    <td className="num">{line.par}</td>
+                    <td className="num">{line.over > 0 ? `+${line.over}` : '—'}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </details>
       )}
     </>
   )
@@ -757,7 +857,7 @@ export default function InventoryTab() {
           </button>
         ))}
       </nav>
-      {view === 'report' && <OrderReport items={items} sources={sources} openRequests={openRequests} goToRequests={() => setView('requests')} />}
+      {view === 'report' && <OrderReport items={items} sources={sources} categories={categories} openRequests={openRequests} goToRequests={() => setView('requests')} />}
       {view === 'items' && (
         <ItemsEditor
           key={itemsFilter ?? 'all'}
