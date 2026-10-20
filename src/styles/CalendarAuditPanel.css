@@ -1,0 +1,140 @@
+.audit-panel {
+  margin-bottom: 1.5rem;
+  padding: 1rem;
+  border: 1px solid #e1e4ea;
+  border-radius: 8px;
+  background: #fff;
+}
+
+.audit-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 1rem;
+  flex-wrap: wrap;
+}
+
+.audit-header h3,
+.audit-header h4 {
+  margin: 0;
+}
+
+.audit-panel button {
+  background: #667eea;
+  color: #fff;
+  border: none;
+  border-radius: 6px;
+  padding: 0.35rem 0.7rem;
+  cursor: pointer;
+}
+
+.audit-panel button:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.audit-panel .audit-dismiss {
+  background: #e9ecef;
+  color: #2c3e50;
+}
+
+.audit-muted {
+  color: #6c757d;
+  font-size: 0.9rem;
+}
+
+.audit-ok {
+  color: #1e7b34;
+  font-weight: 600;
+}
+
+.audit-warning,
+.audit-error {
+  padding: 0.6rem 0.8rem;
+  border-radius: 6px;
+}
+
+.audit-warning {
+  background: #fff4d6;
+  color: #7a5800;
+}
+
+.audit-error {
+  background: #fde8e8;
+  color: #a12020;
+}
+
+.audit-bulk {
+  margin: 0.5rem 0;
+}
+
+.audit-list {
+  list-style: none;
+  padding: 0;
+  margin: 0.5rem 0 0;
+}
+
+.audit-item {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0.6rem 0.8rem;
+  margin-bottom: 0.5rem;
+  border-left: 4px solid #adb5bd;
+  border-radius: 4px;
+  background: #f8f9fa;
+  flex-wrap: wrap;
+}
+
+.audit-item p {
+  margin: 0.25rem 0 0;
+}
+
+.audit-high {
+  border-left-color: #d63939;
+}
+
+.audit-medium {
+  border-left-color: #f0a020;
+}
+
+.audit-low {
+  border-left-color: #6c8ebf;
+}
+
+.audit-tag {
+  display: inline-block;
+  margin-right: 0.5rem;
+  padding: 0 0.4rem;
+  border-radius: 4px;
+  background: #e9ecef;
+  font-size: 0.75rem;
+  text-transform: uppercase;
+}
+
+.audit-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
+.audit-changes {
+  margin-top: 1rem;
+}
+
+.audit-table {
+  width: 100%;
+  margin-top: 0.5rem;
+  border-collapse: collapse;
+  font-size: 0.9rem;
+}
+
+.audit-table td {
+  padding: 0.3rem 0.5rem;
+  border-bottom: 1px solid #eee;
+}
+
+.audit-row-flag {
+  background: #fde8e8;
+}

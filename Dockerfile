@@ -15,6 +15,9 @@ RUN --mount=type=secret,id=VITE_FIREBASE_API_KEY \
 	--mount=type=secret,id=VITE_FIREBASE_APP_ID \
 	--mount=type=secret,id=VITE_GOOGLE_CALENDAR_ID \
 	--mount=type=secret,id=VITE_GOOGLE_CALENDAR_API_KEY \
+	--mount=type=secret,id=VITE_GOOGLE_EVENTS_CALENDAR_ID \
+	--mount=type=secret,id=VITE_GOOGLE_SCHEDULE_CALENDAR_ID \
+	--mount=type=secret,id=VITE_GOOGLE_CALENDAR_TRUSTED_EDITORS \
 	/bin/sh -c 'export VITE_FIREBASE_API_KEY="$(cat /run/secrets/VITE_FIREBASE_API_KEY)" && \
 	export VITE_FIREBASE_AUTH_DOMAIN="$(cat /run/secrets/VITE_FIREBASE_AUTH_DOMAIN)" && \
 	export VITE_FIREBASE_PROJECT_ID="$(cat /run/secrets/VITE_FIREBASE_PROJECT_ID)" && \
@@ -23,6 +26,9 @@ RUN --mount=type=secret,id=VITE_FIREBASE_API_KEY \
 	export VITE_FIREBASE_APP_ID="$(cat /run/secrets/VITE_FIREBASE_APP_ID)" && \
 	export VITE_GOOGLE_CALENDAR_ID="$(cat /run/secrets/VITE_GOOGLE_CALENDAR_ID)" && \
 	export VITE_GOOGLE_CALENDAR_API_KEY="$(cat /run/secrets/VITE_GOOGLE_CALENDAR_API_KEY)" && \
+	export VITE_GOOGLE_EVENTS_CALENDAR_ID="$(cat /run/secrets/VITE_GOOGLE_EVENTS_CALENDAR_ID 2>/dev/null)" && \
+	export VITE_GOOGLE_SCHEDULE_CALENDAR_ID="$(cat /run/secrets/VITE_GOOGLE_SCHEDULE_CALENDAR_ID 2>/dev/null)" && \
+	export VITE_GOOGLE_CALENDAR_TRUSTED_EDITORS="$(cat /run/secrets/VITE_GOOGLE_CALENDAR_TRUSTED_EDITORS 2>/dev/null)" && \
 	npm run build'
 
 # Stage 2: Serve

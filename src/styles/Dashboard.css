@@ -66,3 +66,20 @@
   border-color: #667eea;
   color: #fff;
 }
+
+.tab-badge {
+  display: inline-block;
+  margin-left: 0.4rem;
+  min-width: 1.2rem;
+  padding: 0 0.35rem;
+  border-radius: 999px;
+  background: #f0a020;
+  color: #fff;
+  font-size: 0.75rem;
+  line-height: 1.2rem;
+  text-align: center;
+}
+
+.tab-badge-alert {
+  background: #d63939;
+}

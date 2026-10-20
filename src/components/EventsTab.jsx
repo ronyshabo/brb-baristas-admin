@@ -5,15 +5,17 @@ import { v4 as uuidv4 } from 'uuid'
 import { signInWithGoogleCalendar } from '../firebase/googleAuth'
 import {
   approveEvent,
-  calendarId,
   isApprovedEvent,
-  createCalendarEvent,
+  createCalendarEventRecord,
+  deleteCalendarEvent,
+  pushEventToCalendar,
   isHiddenFromWebsite,
   isMissingFromCalendar,
   publishEventToWebsite,
   summarizeApprovals,
   syncEventToCalendar,
 } from '../services/eventSync'
+import CalendarAuditPanel from './CalendarAuditPanel'
 import '../styles/EventsTab.css'
 
 const getInitialFormData = () => ({
@@ -59,7 +61,7 @@ const formatTime12Hour = (time24) => {
   return `${hour}:${minute} ${period}`
 }
 
-function EventsTab({ user, accessToken, setAccessToken }) {
+function EventsTab({ user, accessToken, setAccessToken, audit }) {
   // Helper: Find conflicting event IDs (same date and time)
   const getConflictingEventIds = () => {
     const conflicts = new Set();
@@ -226,12 +228,13 @@ function EventsTab({ user, accessToken, setAccessToken }) {
       await Promise.all(
         eventDates.map(async (dateValue) => {
           const customId = `${dateValue}_${startTime.replace(':', '')}`
-          let googleCalendarEventId = null
+          let calendarRecord = { googleCalendarEventId: null }
 
           if (accessToken) {
             try {
-              googleCalendarEventId = await createCalendarEvent(
+              calendarRecord = await createCalendarEventRecord(
                 {
+                  id: customId,
                   title: formData.title,
                   date: dateValue,
                   startTime,
@@ -257,7 +260,7 @@ function EventsTab({ user, accessToken, setAccessToken }) {
             bandEmail: formData.bandEmail,
             adminId: user.uid,
             createdAt: new Date(),
-            googleCalendarEventId,
+            ...calendarRecord,
             status: 'pending',
             showOnWebsite: formData.showOnWebsite,
             isRecurring: formData.isRecurring,
@@ -309,13 +312,16 @@ function EventsTab({ user, accessToken, setAccessToken }) {
     setShowForm(true)
   }
 
+  // Saves the edit and pushes it to Google Calendar. Edits used to stop at
+  // Firestore, so phones kept showing the old date or time. updateDoc (not
+  // setDoc) so fields this form does not know about, like bandId, survive.
   const handleUpdateEvent = async (e) => {
     e.preventDefault()
     try {
       const startTime = convertTo24Hour(formData.startHour, formData.startMinute, formData.startPeriod)
       const endTime = convertTo24Hour(formData.endHour, formData.endMinute, formData.endPeriod)
-      
-      const eventData = {
+
+      let eventData = {
         title: formData.title,
         date: formData.date,
         startTime,
@@ -324,19 +330,38 @@ function EventsTab({ user, accessToken, setAccessToken }) {
         bandEmail: formData.bandEmail,
         adminId: user.uid,
         updatedAt: new Date(),
-        googleCalendarEventId: editingEvent.googleCalendarEventId,
-        status: editingEvent.status,
         showOnWebsite: formData.showOnWebsite,
-        createdAt: editingEvent.createdAt,
       }
-      
-      await setDoc(doc(db, 'events', editingEvent.id), eventData)
-      setEvents(events.map(e => e.id === editingEvent.id ? { id: editingEvent.id, ...eventData } : e))
+
+      await updateDoc(doc(db, 'events', editingEvent.id), eventData)
+
+      if (editingEvent.googleCalendarEventId) {
+        if (accessToken) {
+          try {
+            const calendarUpdates = await pushEventToCalendar({ ...editingEvent, ...eventData }, accessToken)
+            eventData = { ...eventData, ...calendarUpdates }
+          } catch (calendarError) {
+            console.error('Error updating Google Calendar event:', calendarError)
+            const failed = { calendarSyncStatus: 'stale', calendarSyncError: calendarError?.message || 'unknown error' }
+            await updateDoc(doc(db, 'events', editingEvent.id), failed)
+            eventData = { ...eventData, ...failed }
+            alert(`Saved in the app, but Google Calendar was not updated (${failed.calendarSyncError}). Phones still show the old version until you fix it from the Calendar check.`)
+          }
+        } else {
+          const stale = { calendarSyncStatus: 'stale' }
+          await updateDoc(doc(db, 'events', editingEvent.id), stale)
+          eventData = { ...eventData, ...stale }
+          alert('Saved in the app, but Google Calendar is not connected, so phones still show the old version. Connect Google and use the Calendar check to push it.')
+        }
+      }
+
+      setEvents(events.map(e => e.id === editingEvent.id ? { ...e, ...eventData } : e))
       setFormData(getInitialFormData())
       setShowForm(false)
       setEditingEvent(null)
     } catch (err) {
       console.error('Error updating event:', err)
+      alert('Failed to update event')
     }
   }
 
@@ -347,33 +372,26 @@ function EventsTab({ user, accessToken, setAccessToken }) {
     try {
       const event = events.find(e => e.id === eventId)
       
-      // Delete from Google Calendar if it exists
-      if (event?.googleCalendarEventId && accessToken && calendarId) {
+      // Remove the Google entry first. If that cannot happen, keep the doc: a
+      // deleted doc with a live Google entry is an event that only phones show.
+      if (event?.googleCalendarEventId) {
         try {
-          const response = await fetch(
-            `https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(calendarId)}/events/${event.googleCalendarEventId}`,
-            {
-              method: 'DELETE',
-              headers: {
-                Authorization: `Bearer ${accessToken}`,
-              },
-            }
-          )
-          
-          if (!response.ok) {
-            console.error('Failed to delete from Google Calendar')
-          }
+          await deleteCalendarEvent(event, accessToken)
         } catch (err) {
           console.error('Error deleting from Google Calendar:', err)
+          alert(`"${event.title}" was not deleted: ${err?.message || 'Google Calendar error'} Connect Google and try again.`)
+          return false
         }
       }
-      
+
       // Delete from Firestore
       await deleteDoc(doc(db, 'events', eventId))
       setEvents((previousEvents) => previousEvents.filter((entry) => entry.id !== eventId))
+      return true
     } catch (err) {
       console.error('Error deleting event:', err)
       alert('Failed to delete event')
+      return false
     }
   }
 
@@ -386,7 +404,7 @@ function EventsTab({ user, accessToken, setAccessToken }) {
 
     try {
       for (const eventId of entry.eventIds) {
-        await handleDeleteEvent(eventId, { confirmDelete: false })
+        if (!(await handleDeleteEvent(eventId, { confirmDelete: false }))) return
       }
       setSelectedEventIds((previousSelected) => previousSelected.filter((id) => id !== entry.entryId))
     } catch (err) {
@@ -661,6 +679,9 @@ function EventsTab({ user, accessToken, setAccessToken }) {
           {showForm ? 'Cancel' : editingEvent ? 'Cancel Edit' : 'Create Event'}
         </button>
       </div>
+
+      {/* Moved here from the old Calendar tab: checks Google Calendar against the app. */}
+      {audit && <CalendarAuditPanel audit={audit} accessToken={accessToken} />}
 
       {!accessToken && (
         <div className="google-connect-banner">

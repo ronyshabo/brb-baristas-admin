@@ -1,0 +1,1257 @@
+@import url('https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap');
+
+/* Shared by the barista page and the admin tab. Everything is scoped under
+   .sched-* so it can sit inside the admin dashboard without leaking.
+
+   Theme follows brbcoffee-atx.com: cream paper windows with orange title
+   bars, black borders, silver bevelled buttons, maroon headings and the
+   "Press Start 2P" pixel font. Names, times and body copy use the site's
+   form font (MS Sans Serif / Arial) so they stay readable on a phone. */
+
+.sched-root,
+.sched-modal-backdrop {
+  --sched-pixel: 'Press Start 2P', 'Courier New', monospace;
+  --sched-ui: 'MS Sans Serif', Tahoma, Verdana, Arial, sans-serif;
+
+  --sched-ink: #111;
+  --sched-muted: #555;
+  --sched-line: #9a9a9a;
+  --sched-border: #000;
+  --sched-paper: #f7e6d4;
+  --sched-surface: #fff;
+  --sched-wash: #fffff8;
+  --sched-silver: #c0c0c0;
+  --sched-accent: #eb5a40;
+  --sched-heading: #800000;
+  --sched-link: #000080;
+  --sched-cta: #197a4d;
+
+  --sched-opening-bg: #fff2c2;
+  --sched-opening-line: #b8860b;
+  --sched-opening-ink: #5c3d00;
+  --sched-closing-bg: #c5e3f6;
+  --sched-closing-line: #2a6496;
+  --sched-closing-ink: #003399;
+  --sched-shared-bg: #ccffcc;
+  --sched-shared-line: #00aa00;
+  --sched-shared-ink: #006600;
+  --sched-open-ink: #cc0000;
+
+  color: var(--sched-ink);
+  font-family: var(--sched-ui);
+}
+
+.sched-root *,
+.sched-modal-backdrop * {
+  box-sizing: border-box;
+}
+
+.sched-muted {
+  color: var(--sched-muted);
+  font-size: 0.9rem;
+}
+
+.sched-error,
+.sched-warning {
+  padding: 8px 12px;
+  border: 2px solid;
+  font-size: 0.9rem;
+}
+
+.sched-error {
+  border-color: #cc0000;
+  background: #ffcccc;
+  color: #cc0000;
+}
+
+.sched-warning {
+  border-color: #b8860b;
+  background: #fff7ec;
+  color: #5c3d00;
+}
+
+.sched-warning p {
+  margin: 0 0 6px;
+}
+
+.sched-count {
+  display: inline-block;
+  min-width: 1.6em;
+  padding: 3px 5px;
+  border: 1px solid var(--sched-border);
+  background: var(--sched-surface);
+  color: var(--sched-ink);
+  font-family: var(--sched-pixel);
+  font-size: 0.55rem;
+  line-height: 1;
+  text-align: center;
+  vertical-align: middle;
+}
+
+.sched-link-btn {
+  border: none;
+  background: none;
+  padding: 0 4px;
+  color: var(--sched-link);
+  font: inherit;
+  font-size: 0.9rem;
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+/* Silver, bevelled, like the website's "Read Latest Posts" buttons. */
+.sched-btn {
+  display: inline-block;
+  padding: 8px 12px;
+  border: 2px outset #fff;
+  background: var(--sched-silver);
+  color: #000;
+  font-family: var(--sched-pixel);
+  font-size: 0.6rem;
+  line-height: 1.4;
+  text-decoration: none;
+  cursor: pointer;
+}
+
+.sched-btn:active {
+  border-style: inset;
+}
+
+.sched-btn:disabled,
+.sched-btn.is-disabled {
+  color: #808080;
+  pointer-events: none;
+}
+
+.sched-btn-primary {
+  border-color: #f7a090;
+  background: var(--sched-accent);
+  color: #fff;
+}
+
+.sched-btn-primary:disabled,
+.sched-btn-primary.is-disabled {
+  border-color: #fff;
+  background: var(--sched-silver);
+  color: #808080;
+}
+
+/* ---- month nav + legend ---- */
+
+.sched-month-nav {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 14px 0 10px;
+}
+
+.sched-month-nav h2 {
+  margin: 0;
+  min-width: 12ch;
+  color: var(--sched-heading);
+  font-family: var(--sched-pixel);
+  font-size: 0.95rem;
+  text-align: center;
+}
+
+.sched-nav-btn {
+  width: 32px;
+  height: 32px;
+  border: 2px outset #fff;
+  background: var(--sched-silver);
+  color: #000;
+  font-family: var(--sched-pixel);
+  font-size: 0.8rem;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.sched-nav-btn:active {
+  border-style: inset;
+}
+
+.sched-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 10px;
+  font-size: 0.8rem;
+}
+
+.sched-legend-item {
+  padding: 3px 8px;
+  border: 2px solid;
+  font-weight: 700;
+}
+
+/* Shift colours. Used by bubbles, legend, chips and lists alike. */
+.sched-bubble-opening { background: var(--sched-opening-bg); border-color: var(--sched-opening-line); color: var(--sched-opening-ink); }
+.sched-bubble-closing { background: var(--sched-closing-bg); border-color: var(--sched-closing-line); color: var(--sched-closing-ink); }
+.sched-bubble-shared  { background: var(--sched-shared-bg);  border-color: var(--sched-shared-line);  color: var(--sched-shared-ink); }
+
+.sched-legend-item.is-open {
+  border-style: dashed;
+  border-color: var(--sched-open-ink);
+  color: var(--sched-open-ink);
+  background: var(--sched-surface);
+}
+
+/* ---- month grid ---- */
+
+.sched-calendar {
+  border: 2px solid var(--sched-border);
+  background: var(--sched-surface);
+}
+
+.sched-weekdays,
+.sched-week {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+}
+
+.sched-weekdays div {
+  padding: 7px 0;
+  background: var(--sched-accent);
+  border-bottom: 2px solid var(--sched-border);
+  color: #fff;
+  font-family: var(--sched-pixel);
+  font-size: 0.55rem;
+  text-align: center;
+  text-transform: uppercase;
+}
+
+.sched-day {
+  display: flex;
+  flex-direction: column;
+  min-height: 112px;
+  min-width: 0;
+  padding: 5px;
+  border-right: 1px solid var(--sched-line);
+  border-bottom: 1px solid var(--sched-line);
+  background: var(--sched-surface);
+}
+
+.sched-week > .sched-day:nth-child(7n) {
+  border-right: none;
+}
+
+.sched-week:last-child .sched-day {
+  border-bottom: none;
+}
+
+.sched-day.is-empty {
+  background: #e4e4e4;
+}
+
+.sched-day.is-today .sched-day-number {
+  background: var(--sched-accent);
+  color: #fff;
+}
+
+.sched-day.is-past {
+  opacity: 0.55;
+}
+
+.sched-day.is-off {
+  background: repeating-linear-gradient(135deg, #fff 0 6px, #ffe3e3 6px 12px);
+}
+
+.sched-day-number {
+  align-self: flex-start;
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  min-width: 22px;
+  height: 22px;
+  margin-bottom: 4px;
+  padding: 0 5px;
+  font-family: var(--sched-pixel);
+  font-size: 0.6rem;
+  line-height: 22px;
+}
+
+.sched-off-tag {
+  color: var(--sched-open-ink);
+  font-size: 0.5rem;
+  text-transform: uppercase;
+}
+
+/* Weekend columns are wider so the Shared bubble has room for full names. */
+.sched-calendar-wide .sched-weekdays,
+.sched-calendar-wide .sched-week {
+  grid-template-columns: repeat(4, minmax(0, 1fr)) repeat(3, minmax(0, 1.65fr));
+}
+
+.sched-calendar-wide .sched-day {
+  min-height: 150px;
+}
+
+.sched-day-weekday {
+  display: none;
+}
+
+/* Opening on top, Closing under it; on shared days Shared sits to their
+   right, centred between the two. */
+.sched-day-bubbles {
+  flex: 1;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-rows: 1fr 1fr;
+  gap: 6px;
+}
+
+.sched-day.has-shared .sched-day-bubbles {
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+}
+
+.sched-day-bubbles .sched-bubble-opening { grid-column: 1; grid-row: 1; }
+.sched-day-bubbles .sched-bubble-closing { grid-column: 1; grid-row: 2; }
+.sched-day-bubbles .sched-bubble-shared  { grid-column: 2; grid-row: 1 / span 2; align-self: center; }
+
+.sched-bubble {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 3px;
+  min-width: 0;
+  min-height: 52px;
+  padding: 6px 7px;
+  border: 2px solid;
+  border-radius: 6px;
+  box-shadow: 2px 2px 0 rgba(0, 0, 0, 0.25);
+  cursor: pointer;
+}
+
+.sched-bubble:hover {
+  box-shadow: 2px 2px 0 rgba(0, 0, 0, 0.55);
+}
+
+.sched-bubble.is-open {
+  background: var(--sched-surface);
+  border-style: dashed;
+  box-shadow: none;
+}
+
+.sched-bubble.is-mine {
+  outline: 3px solid var(--sched-border);
+  outline-offset: 1px;
+}
+
+.sched-bubble-head {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 3px 6px;
+  align-items: baseline;
+  padding: 0;
+  border: none;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.sched-bubble-label {
+  font-family: var(--sched-pixel);
+  font-size: 0.5rem;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+}
+
+.sched-bubble-empty {
+  color: var(--sched-open-ink);
+  font-size: 0.85rem;
+  font-weight: 700;
+}
+
+.sched-bubble-time {
+  font-size: 0.72rem;
+  white-space: nowrap;
+}
+
+/* Hours changed for this one day. */
+.sched-bubble-time.is-custom {
+  padding: 0 4px;
+  background: var(--sched-border);
+  color: #fff;
+  font-weight: 700;
+}
+
+.sched-legend-item.is-custom-key {
+  display: inline-flex;
+  gap: 6px;
+  align-items: center;
+  border-color: var(--sched-border);
+  background: var(--sched-surface);
+  font-weight: 400;
+}
+
+.sched-gap-tag {
+  padding: 2px 5px;
+  border: 1px solid var(--sched-open-ink);
+  background: #ffcccc;
+  color: var(--sched-open-ink);
+  font-family: var(--sched-pixel);
+  font-size: 0.45rem;
+  line-height: 1.3;
+  white-space: nowrap;
+}
+
+.sched-custom-tag {
+  margin-left: 6px;
+  padding: 1px 5px;
+  background: var(--sched-border);
+  color: #fff;
+  font-size: 0.72rem;
+  font-weight: 700;
+}
+
+/* Full names, one per line; each one is its own button. */
+.sched-bubble-names {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.sched-name {
+  width: 100%;
+  padding: 2px 5px;
+  border: 1px solid rgba(0, 0, 0, 0.25);
+  background: rgba(255, 255, 255, 0.7);
+  color: inherit;
+  font: inherit;
+  font-size: 0.85rem;
+  font-weight: 700;
+  line-height: 1.25;
+  text-align: left;
+  overflow-wrap: break-word;
+  cursor: pointer;
+}
+
+.sched-name:hover {
+  border-color: var(--sched-border);
+  background: #fff;
+}
+
+.sched-name.is-me {
+  border-color: var(--sched-border);
+  background: var(--sched-border);
+  color: #fff;
+}
+
+.sched-bubble-head:focus-visible,
+.sched-name:focus-visible,
+.sched-btn:focus-visible,
+.sched-pick:focus-visible {
+  outline: 2px dotted var(--sched-border);
+  outline-offset: 2px;
+}
+
+/* ---- hours ---- */
+
+.sched-hours-form {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+
+.sched-hours-form input,
+.sched-hours-table input,
+.sched-field input,
+.sched-field textarea,
+.sched-inline-form input,
+.sched-range input[type='date'] {
+  padding: 6px 8px;
+  border: 2px inset #dfdfdf;
+  border-radius: 0;
+  background: #fff;
+  color: var(--sched-ink);
+  font-family: var(--sched-ui);
+  font-size: 0.9rem;
+  font-weight: 400;
+}
+
+.sched-hours-summary p {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+  margin: 6px 0;
+}
+
+.sched-hours-summary strong {
+  min-width: 6em;
+  color: var(--sched-heading);
+}
+
+.sched-hours-chip {
+  padding: 2px 8px;
+  border: 2px solid;
+  font-size: 0.85rem;
+  font-weight: 700;
+}
+
+.sched-hours-table {
+  width: 100%;
+  margin: 8px 0;
+  border: 2px solid var(--sched-border);
+  border-collapse: collapse;
+  background: var(--sched-surface);
+}
+
+.sched-hours-table th,
+.sched-hours-table td {
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--sched-line);
+  text-align: left;
+  vertical-align: middle;
+}
+
+.sched-hours-table thead th {
+  background: var(--sched-silver);
+  border-bottom: 2px solid var(--sched-border);
+  font-family: var(--sched-pixel);
+  font-size: 0.55rem;
+}
+
+.sched-hours-table tbody th {
+  color: var(--sched-heading);
+}
+
+.sched-hours-table td {
+  white-space: nowrap;
+}
+
+.sched-hours-table td span {
+  margin: 0 4px;
+}
+
+.sched-hours-table td small {
+  display: block;
+}
+
+.sched-hours-table td.is-invalid input {
+  border-color: var(--sched-open-ink);
+}
+
+/* ---- picker: a window, like the website's pop-up widgets ---- */
+
+.sched-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+  background: rgba(0, 40, 20, 0.45);
+}
+
+.sched-modal {
+  width: min(460px, 100%);
+  max-height: min(660px, 90vh);
+  overflow-y: auto;
+  border: 3px outset #dfdfdf;
+  background: var(--sched-paper);
+  box-shadow: 1px 1px #fff inset, -1px -1px #404040 inset, 6px 6px 0 rgba(0, 0, 0, 0.35);
+}
+
+.sched-modal section {
+  padding: 12px 14px;
+  border-top: 1px solid var(--sched-line);
+}
+
+.sched-modal > .sched-muted {
+  margin: 0;
+  padding: 12px 14px;
+}
+
+.sched-modal h4 {
+  margin: 0 0 10px;
+  color: var(--sched-heading);
+  font-family: var(--sched-pixel);
+  font-size: 0.55rem;
+  text-transform: uppercase;
+}
+
+.sched-modal-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 10px 12px;
+  border-bottom: 6px solid;
+  background: var(--sched-accent);
+  color: #fff;
+}
+
+.sched-modal-header h3 {
+  margin: 0 0 6px;
+  font-family: var(--sched-pixel);
+  font-size: 0.75rem;
+}
+
+.sched-modal-header p {
+  margin: 0;
+  font-size: 0.9rem;
+  font-weight: 700;
+}
+
+/* The strip under the title bar carries the shift colour. */
+.sched-header-opening { border-bottom-color: var(--sched-opening-line); }
+.sched-header-closing { border-bottom-color: var(--sched-closing-line); }
+.sched-header-shared  { border-bottom-color: var(--sched-shared-line); }
+
+.sched-modal-header .sched-custom-tag {
+  background: #fff;
+  color: var(--sched-ink);
+}
+
+/* A Windows-style close box. */
+.sched-close {
+  flex: none;
+  width: 24px;
+  height: 22px;
+  padding: 0;
+  border: 2px outset #fff;
+  background: var(--sched-silver);
+  color: #000;
+  font-family: var(--sched-pixel);
+  font-size: 0.6rem;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.sched-close:active {
+  border-style: inset;
+}
+
+.sched-chip-list,
+.sched-pick-list,
+.sched-open-list,
+.sched-clash-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.sched-pick-list li + li {
+  margin-top: 4px;
+}
+
+.sched-pick {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 9px 10px;
+  border: 2px solid var(--sched-border);
+  background: var(--sched-surface);
+  color: var(--sched-ink);
+  font: inherit;
+  font-weight: 700;
+  text-align: left;
+  cursor: pointer;
+}
+
+.sched-pick:hover {
+  background: var(--sched-wash);
+  box-shadow: 3px 3px 0 var(--sched-accent);
+}
+
+.sched-pick-note {
+  color: var(--sched-muted);
+  font-size: 0.8rem;
+  font-weight: 400;
+}
+
+.sched-pick-add {
+  margin-left: auto;
+  color: var(--sched-accent);
+  font-family: var(--sched-pixel);
+  font-size: 0.55rem;
+}
+
+.sched-pick.is-off {
+  border-style: dashed;
+  color: #777;
+  background: #f0f0f0;
+}
+
+.sched-pick.is-static {
+  cursor: default;
+}
+
+.sched-pick.is-static:hover {
+  box-shadow: none;
+}
+
+.sched-assigned-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.sched-assigned-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 10px;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 10px;
+  border: 2px solid var(--sched-border);
+  background: var(--sched-surface);
+}
+
+.sched-assigned-row + .sched-assigned-row {
+  margin-top: 6px;
+}
+
+.sched-assigned-row.is-focus {
+  box-shadow: 3px 3px 0 var(--sched-accent);
+}
+
+.sched-assigned-row.is-replacing {
+  background: #fff7ec;
+}
+
+.sched-assigned-name {
+  font-weight: 700;
+}
+
+.sched-row-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.sched-mini {
+  padding: 5px 8px;
+  border: 2px outset #fff;
+  background: var(--sched-silver);
+  color: #000;
+  font: inherit;
+  font-size: 0.78rem;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.sched-mini:active {
+  border-style: inset;
+}
+
+.sched-mini.is-danger {
+  color: var(--sched-open-ink);
+}
+
+.sched-btn-block {
+  width: 100%;
+  padding: 12px;
+  font-size: 0.65rem;
+}
+
+.sched-hint {
+  margin: 8px 0 0;
+  font-size: 0.8rem;
+}
+
+/* ---- panels: website-style windows with an orange title bar ---- */
+
+.sched-panels {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 14px;
+  margin-top: 16px;
+}
+
+.sched-panel {
+  margin-top: 16px;
+  padding: 12px 14px;
+  border: 2px solid var(--sched-border);
+  background: var(--sched-paper);
+}
+
+.sched-panels .sched-panel {
+  margin-top: 0;
+}
+
+.sched-panel > h3,
+.sched-panel > .sched-alerts-head {
+  margin: -12px -14px 12px;
+  padding: 7px 10px;
+  background: var(--sched-accent);
+  color: #fff;
+}
+
+.sched-panel h3 {
+  margin-bottom: 0;
+  font-family: var(--sched-pixel);
+  font-size: 0.65rem;
+  line-height: 1.6;
+}
+
+.sched-panel > h3 {
+  margin-bottom: 12px;
+}
+
+.sched-panel > .sched-alerts-head .sched-link-btn,
+.sched-panel > .sched-alerts-head .sched-muted {
+  color: #fff;
+}
+
+.sched-panel > p:first-child {
+  margin-top: 0;
+}
+
+.sched-open-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.sched-open-chip {
+  padding: 4px 8px;
+  border: 2px dashed;
+  font: inherit;
+  font-size: 0.85rem;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.sched-open-text {
+  color: var(--sched-open-ink);
+  font-weight: 700;
+}
+
+.sched-clash-list li {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 4px;
+  padding: 6px 0;
+  border-bottom: 1px solid var(--sched-line);
+  font-size: 0.9rem;
+}
+
+.sched-range {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 16px;
+  align-items: center;
+  margin-bottom: 10px;
+  font-size: 0.9rem;
+}
+
+.sched-range label {
+  display: inline-flex;
+  gap: 4px;
+  align-items: center;
+}
+
+.sched-range-custom {
+  display: inline-flex;
+  gap: 6px;
+  align-items: center;
+}
+
+.sched-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 10px 0;
+  color: var(--sched-heading);
+  font-size: 0.85rem;
+  font-weight: 700;
+}
+
+.sched-field input,
+.sched-field textarea,
+.sched-inline-form input {
+  width: 100%;
+}
+
+.sched-field textarea {
+  font-family: 'Courier New', monospace;
+  font-size: 0.85rem;
+  resize: vertical;
+}
+
+.sched-inline-form {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  margin-top: 6px;
+}
+
+.sched-inline-form span {
+  min-width: 8em;
+}
+
+.sched-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+
+/* ---- dropped shifts (admin) ---- */
+
+.sched-alerts.has-alerts {
+  box-shadow: 4px 4px 0 var(--sched-open-ink);
+}
+
+.sched-alerts-head {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+}
+
+.sched-count.is-alert {
+  border-color: #fff;
+  background: #ff0000;
+  color: #fff;
+}
+
+.sched-alert-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.sched-alert {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px 16px;
+  padding: 10px 0;
+  border-top: 1px solid var(--sched-line);
+}
+
+.sched-alert:first-child {
+  border-top: none;
+  padding-top: 0;
+}
+
+.sched-alert-main {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+  font-size: 0.9rem;
+}
+
+.sched-alert-shift {
+  align-self: flex-start;
+  padding: 2px 8px;
+  border: 2px dashed;
+}
+
+.sched-alert.is-covered .sched-alert-shift {
+  border-style: solid;
+}
+
+.sched-empty-note {
+  margin: 0;
+  color: var(--sched-open-ink);
+  font-weight: 700;
+}
+
+/* ---- availability tab ---- */
+
+.sched-calendar-compact .sched-day {
+  min-height: 72px;
+}
+
+.sched-avail-day {
+  align-items: flex-start;
+  gap: 3px;
+  border-top: none;
+  border-left: none;
+  background: var(--sched-surface);
+  font: inherit;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.sched-avail-day:hover:not(:disabled) {
+  background: var(--sched-wash);
+}
+
+.sched-avail-day:disabled {
+  cursor: default;
+}
+
+.sched-avail-day.is-off {
+  background: #ffcccc;
+}
+
+.sched-avail-state {
+  color: var(--sched-shared-ink);
+  font-family: var(--sched-pixel);
+  font-size: 0.5rem;
+}
+
+.sched-avail-day.is-off .sched-avail-state {
+  color: var(--sched-open-ink);
+}
+
+.sched-avail-grid {
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-touch-callout: none;
+}
+
+.sched-avail-grid.is-dragging .sched-avail-day {
+  cursor: cell;
+}
+
+.sched-avail-day.is-preview-off {
+  background: #ffb3b3;
+  box-shadow: inset 0 0 0 3px var(--sched-open-ink);
+}
+
+.sched-avail-day.is-preview-off .sched-avail-state {
+  color: var(--sched-open-ink);
+}
+
+.sched-avail-day.is-preview-on {
+  background: var(--sched-shared-bg);
+  box-shadow: inset 0 0 0 3px var(--sched-shared-line);
+}
+
+.sched-avail-day.is-preview-on .sched-avail-state {
+  color: var(--sched-shared-ink);
+}
+
+.sched-avail-help {
+  min-height: 2.6em;
+}
+
+.sched-avail-working {
+  margin-top: auto;
+  font-size: 0.72rem;
+  color: var(--sched-muted);
+}
+
+/* ---- usual week + day chooser ---- */
+
+.sched-weekly-table {
+  width: 100%;
+  border: 2px solid var(--sched-border);
+  border-collapse: collapse;
+  background: var(--sched-surface);
+}
+
+.sched-weekly-table th,
+.sched-weekly-table td {
+  padding: 5px 6px;
+  border-bottom: 1px solid var(--sched-line);
+  text-align: center;
+}
+
+.sched-weekly-table thead th {
+  background: var(--sched-silver);
+  border-bottom: 2px solid var(--sched-border);
+  font-family: var(--sched-pixel);
+  font-size: 0.5rem;
+}
+
+.sched-weekly-table tbody th {
+  color: var(--sched-heading);
+  font-weight: 700;
+  text-align: left;
+}
+
+.sched-weekly-table td.is-na {
+  color: #bbb;
+}
+
+.sched-short-label {
+  display: none;
+}
+
+.sched-weekly-cell,
+.sched-choice {
+  width: 100%;
+  min-height: 34px;
+  padding: 6px 8px;
+  border: 2px solid;
+  font: inherit;
+  font-size: 0.85rem;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.sched-weekly-cell.is-no,
+.sched-choice.is-no,
+.sched-avail-dot.is-no {
+  border-color: var(--sched-open-ink);
+  border-style: dashed;
+  background: #ffcccc;
+  color: var(--sched-open-ink);
+}
+
+.sched-day-choices {
+  display: grid;
+  gap: 6px;
+}
+
+.sched-choice {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  min-height: 44px;
+  text-align: left;
+}
+
+.sched-header-plain {
+  border-bottom-color: var(--sched-border);
+}
+
+.sched-avail-dots {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px;
+}
+
+.sched-avail-dot {
+  display: inline-grid;
+  place-items: center;
+  width: 18px;
+  height: 18px;
+  border: 1.5px solid;
+  font-family: var(--sched-pixel);
+  font-size: 0.45rem;
+  line-height: 1;
+}
+
+.sched-avail-legend {
+  margin-top: 8px;
+  font-size: 0.8rem;
+  line-height: 2;
+}
+
+.sched-avail-legend .sched-avail-dot {
+  vertical-align: middle;
+}
+
+.sched-avail-day.is-partial {
+  background: #fff7ec;
+}
+
+.sched-avail-day.is-partial .sched-avail-state {
+  color: #b8860b;
+}
+
+/* This date is set on its own, not from the usual week. */
+.sched-avail-day.is-custom {
+  background-image: linear-gradient(225deg, var(--sched-border) 0 7px, transparent 7px);
+}
+
+.sched-reason {
+  padding: 1px 5px;
+  border: 1px solid var(--sched-open-ink);
+  background: #ffcccc;
+  color: var(--sched-open-ink);
+  font-size: 0.75rem;
+  white-space: nowrap;
+}
+
+.sched-nobody-tag {
+  padding: 1px 4px;
+  background: var(--sched-open-ink);
+  color: #fff;
+  font-family: var(--sched-pixel);
+  font-size: 0.45rem;
+  line-height: 1.4;
+  white-space: nowrap;
+}
+
+/* ---- phones: the month becomes a list of days, so full names still fit ---- */
+
+@media (max-width: 700px) {
+  .sched-calendar-wide .sched-weekdays {
+    display: none;
+  }
+
+  .sched-calendar-wide .sched-week {
+    display: block;
+  }
+
+  .sched-calendar-wide .sched-day {
+    min-height: 0;
+    padding: 8px 10px 10px;
+    border-right: none;
+  }
+
+  .sched-calendar-wide .sched-day.is-empty {
+    display: none;
+  }
+
+  .sched-calendar-wide .sched-week:last-child .sched-day:not(.is-empty) {
+    border-bottom: 1px solid var(--sched-line);
+  }
+
+  .sched-calendar-wide .sched-day-weekday {
+    display: inline;
+  }
+
+  .sched-calendar-wide .sched-day-number {
+    height: 24px;
+    padding: 0 8px;
+  }
+
+  .sched-bubble {
+    min-height: 46px;
+  }
+
+  .sched-modal-backdrop {
+    align-items: flex-end;
+    padding: 0;
+  }
+
+  .sched-modal {
+    width: 100%;
+    max-height: 85vh;
+  }
+
+  .sched-wide-label {
+    display: none;
+  }
+
+  .sched-short-label {
+    display: inline;
+  }
+
+  .sched-weekly-table th,
+  .sched-weekly-table td {
+    padding: 4px 3px;
+  }
+
+  .sched-weekly-cell {
+    padding: 6px 2px;
+    font-size: 0.75rem;
+  }
+
+  .sched-avail-dot {
+    width: 15px;
+    height: 15px;
+  }
+}
+
+/* "also Opening" on a candidate: picking them means a double shift. */
+.sched-double-note {
+  padding: 1px 5px;
+  border: 1px solid #b8860b;
+  background: #fff2c2;
+  color: #5c3d00;
+  font-weight: 700;
+}

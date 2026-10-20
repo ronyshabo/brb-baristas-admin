@@ -26,6 +26,9 @@ jobs:
           VITE_FIREBASE_APP_ID: ${{ secrets.FIREBASE_APP_ID || secrets.VITE_FIREBASE_APP_ID }}
           VITE_GOOGLE_CALENDAR_ID: ${{ secrets.GOOGLE_CALENDAR_ID || secrets.VITE_GOOGLE_CALENDAR_ID }}
           VITE_GOOGLE_CALENDAR_API_KEY: ${{ secrets.GOOGLE_CALENDAR_API_KEY || secrets.VITE_GOOGLE_CALENDAR_API_KEY }}
+          VITE_GOOGLE_EVENTS_CALENDAR_ID: ${{ secrets.GOOGLE_EVENTS_CALENDAR_ID || secrets.VITE_GOOGLE_EVENTS_CALENDAR_ID }}
+          VITE_GOOGLE_SCHEDULE_CALENDAR_ID: ${{ secrets.GOOGLE_SCHEDULE_CALENDAR_ID || secrets.VITE_GOOGLE_SCHEDULE_CALENDAR_ID }}
+          VITE_GOOGLE_CALENDAR_TRUSTED_EDITORS: ${{ secrets.GOOGLE_CALENDAR_TRUSTED_EDITORS || secrets.VITE_GOOGLE_CALENDAR_TRUSTED_EDITORS }}
         run: |
           set -euo pipefail
           EC2_SSH_PORT="${EC2_SSH_PORT:-2222}"
@@ -57,6 +60,9 @@ jobs:
           VITE_FIREBASE_APP_ID_B64=$(printf %s "$VITE_FIREBASE_APP_ID" | base64 -w 0)
           VITE_GOOGLE_CALENDAR_ID_B64=$(printf %s "$VITE_GOOGLE_CALENDAR_ID" | base64 -w 0)
           VITE_GOOGLE_CALENDAR_API_KEY_B64=$(printf %s "$VITE_GOOGLE_CALENDAR_API_KEY" | base64 -w 0)
+          VITE_GOOGLE_EVENTS_CALENDAR_ID_B64=$(printf %s "$VITE_GOOGLE_EVENTS_CALENDAR_ID" | base64 -w 0)
+          VITE_GOOGLE_SCHEDULE_CALENDAR_ID_B64=$(printf %s "$VITE_GOOGLE_SCHEDULE_CALENDAR_ID" | base64 -w 0)
+          VITE_GOOGLE_CALENDAR_TRUSTED_EDITORS_B64=$(printf %s "$VITE_GOOGLE_CALENDAR_TRUSTED_EDITORS" | base64 -w 0)
 
           mkdir -p ~/.ssh
           echo "$EC2_SSH_KEY" > ~/.ssh/id_rsa
@@ -87,6 +93,9 @@ jobs:
           printf '%s' "$VITE_FIREBASE_APP_ID_B64" | base64 -d > /tmp/VITE_FIREBASE_APP_ID
           printf '%s' "$VITE_GOOGLE_CALENDAR_ID_B64" | base64 -d > /tmp/VITE_GOOGLE_CALENDAR_ID
           printf '%s' "$VITE_GOOGLE_CALENDAR_API_KEY_B64" | base64 -d > /tmp/VITE_GOOGLE_CALENDAR_API_KEY
+          printf '%s' "$VITE_GOOGLE_EVENTS_CALENDAR_ID_B64" | base64 -d > /tmp/VITE_GOOGLE_EVENTS_CALENDAR_ID
+          printf '%s' "$VITE_GOOGLE_SCHEDULE_CALENDAR_ID_B64" | base64 -d > /tmp/VITE_GOOGLE_SCHEDULE_CALENDAR_ID
+          printf '%s' "$VITE_GOOGLE_CALENDAR_TRUSTED_EDITORS_B64" | base64 -d > /tmp/VITE_GOOGLE_CALENDAR_TRUSTED_EDITORS
 
           export DOCKER_BUILDKIT=1
           docker build --no-cache \
@@ -98,6 +107,9 @@ jobs:
             --secret id=VITE_FIREBASE_APP_ID,src=/tmp/VITE_FIREBASE_APP_ID \
             --secret id=VITE_GOOGLE_CALENDAR_ID,src=/tmp/VITE_GOOGLE_CALENDAR_ID \
             --secret id=VITE_GOOGLE_CALENDAR_API_KEY,src=/tmp/VITE_GOOGLE_CALENDAR_API_KEY \
+            --secret id=VITE_GOOGLE_EVENTS_CALENDAR_ID,src=/tmp/VITE_GOOGLE_EVENTS_CALENDAR_ID \
+            --secret id=VITE_GOOGLE_SCHEDULE_CALENDAR_ID,src=/tmp/VITE_GOOGLE_SCHEDULE_CALENDAR_ID \
+            --secret id=VITE_GOOGLE_CALENDAR_TRUSTED_EDITORS,src=/tmp/VITE_GOOGLE_CALENDAR_TRUSTED_EDITORS \
             -t brb-admin:candidate .
 
           rm -f /tmp/VITE_FIREBASE_API_KEY \
@@ -107,7 +119,10 @@ jobs:
             /tmp/VITE_FIREBASE_MESSAGING_SENDER_ID \
             /tmp/VITE_FIREBASE_APP_ID \
             /tmp/VITE_GOOGLE_CALENDAR_ID \
-            /tmp/VITE_GOOGLE_CALENDAR_API_KEY
+            /tmp/VITE_GOOGLE_CALENDAR_API_KEY \
+            /tmp/VITE_GOOGLE_EVENTS_CALENDAR_ID \
+            /tmp/VITE_GOOGLE_SCHEDULE_CALENDAR_ID \
+            /tmp/VITE_GOOGLE_CALENDAR_TRUSTED_EDITORS
 
           docker stop brb-admin && docker rm brb-admin || true
           docker tag brb-admin:candidate brb-admin:latest

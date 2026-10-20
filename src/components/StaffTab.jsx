@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react'
 import { collection, addDoc, getDocs, query, orderBy, doc, updateDoc, deleteDoc, setDoc } from 'firebase/firestore'
 import { db } from '../firebase/config'
 import { signInWithGoogleCalendar, clearGoogleToken } from '../firebase/googleAuth'
+import { SCHEDULE_CALENDAR_ID } from '../services/calendars'
 import BaristaStatementTab from './BaristaStatementTab'
 import '../styles/StaffTab.css'
 
@@ -43,7 +44,8 @@ function StaffTab({ user, accessToken, setAccessToken }) {
   // reports underneath it were a long scroll away.
   const [taxPanelOpen, setTaxPanelOpen] = useState(false)
 
-  const calendarId = import.meta.env.VITE_GOOGLE_CALENDAR_ID
+  // Shifts live on the schedule calendar; band events have their own now.
+  const calendarId = SCHEDULE_CALENDAR_ID
 
   const formatDateKey = (date) => {
     const year = date.getFullYear()
