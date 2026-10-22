@@ -5,7 +5,8 @@ FROM node:18-alpine AS builder
 WORKDIR /app
 
 COPY package*.json ./
-RUN npm install
+# Exactly the lockfile, no audit/fund network calls. Cached until package*.json change.
+RUN npm ci --no-audit --no-fund
 COPY . .
 RUN --mount=type=secret,id=VITE_FIREBASE_API_KEY \
 	--mount=type=secret,id=VITE_FIREBASE_AUTH_DOMAIN \
