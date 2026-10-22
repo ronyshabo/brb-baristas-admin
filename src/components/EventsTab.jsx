@@ -680,9 +680,6 @@ function EventsTab({ user, accessToken, setAccessToken, audit }) {
         </button>
       </div>
 
-      {/* Moved here from the old Calendar tab: checks Google Calendar against the app. */}
-      {audit && <CalendarAuditPanel audit={audit} accessToken={accessToken} />}
-
       {!accessToken && (
         <div className="google-connect-banner">
           <p>
@@ -1053,6 +1050,9 @@ function EventsTab({ user, accessToken, setAccessToken, audit }) {
           })
         )}
       </div>
+
+      {/* Moved here from the old Calendar tab: checks Google Calendar against the app. */}
+      {audit && <CalendarAuditPanel audit={audit} accessToken={accessToken} />}
     </div>
   )
 }

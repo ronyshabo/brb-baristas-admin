@@ -1,9 +1,48 @@
 .audit-panel {
+  margin-top: 1.5rem;
   margin-bottom: 1.5rem;
   padding: 1rem;
   border: 1px solid #e1e4ea;
   border-radius: 8px;
   background: #fff;
+}
+
+.audit-summary {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.audit-summary {
+  list-style: none;
+}
+
+.audit-summary::-webkit-details-marker {
+  display: none;
+}
+
+.audit-summary::before {
+  content: '▸';
+}
+
+.audit-panel[open] > .audit-summary::before {
+  content: '▾';
+}
+
+.audit-panel[open] > .audit-summary {
+  margin-bottom: 0.75rem;
+}
+
+.audit-count {
+  min-width: 1.4em;
+  padding: 0 0.4em;
+  border-radius: 999px;
+  background: #e74c3c;
+  color: #fff;
+  font-size: 0.8rem;
+  text-align: center;
 }
 
 .audit-header {
