@@ -4,7 +4,7 @@
 // schedule docs into the tip calculator's shifts: weekday vs weekend hours,
 // saved defaults, one-day overrides, staff-record names, and the issue list.
 
-import { buildWeek } from './masterSchedule.js'
+import { buildWeek, workedFromDays } from './masterSchedule.js'
 
 let pass = 0, fail = 0
 const eq = (label, got, want) => {
@@ -59,19 +59,38 @@ eq('middle shift counted with its real hours', week.weekSchedule['2026-10-22'].m
 
 const ana = week.weekShifts.filter((s) => s.barista === 'Ana Lopez')
 eq('Ana works 13 shifts', ana.length, 13)
-eq('an empty middle is not an open shift', week.issues.some((issue) => issue.includes('middle')), false)
+eq('an empty middle is not an open shift', week.issues.some((issue) => issue.text.includes('middle')), false)
 eq('weekend opening is 9am - 2pm', hours(ana.find((s) => s.start.getDate() === 18 && s.start.getHours() === 9)), 5)
 eq('one-day override wins', [ana.find((s) => s.start.getDate() === 19).start.getHours(), ana.find((s) => s.start.getDate() === 19).end.getHours()], [7, 13])
 eq('saved weekday closing hours apply', hours(ana.find((s) => s.start.getDate() === 21 && s.start.getHours() === 15)), 6)
 eq('weekend closing keeps the default', ana.some((s) => s.start.getDate() === 24 && s.start.getHours() === 14), true)
 
-eq('issues', week.issues, [
+eq('issues', week.issues.map((issue) => issue.text), [
   'Sun, Oct 18 shared: Cy is marked inactive',
   'Tue, Oct 20 closing: nobody on this shift',
   "Sat, Oct 24 shared: Zed isn't in Manage Baristas",
   'Ben has $0 base pay',
 ])
 eq('preview marks changed hours', week.days[1].shifts.find((s) => s.shift === 'opening').custom, true)
+
+console.log('workedFromDays (shifts split between people)')
+{
+  const days = [{ date: '2026-10-21', shifts: [
+    // Ayah opened, Philip took over at 11.
+    { shift: 'opening', start: '08:00', end: '14:00', people: [{ name: 'Ayah', start: '08:00', end: '11:00' }, { name: 'Philip', start: '11:00', end: '14:00' }] },
+    // Two on the shared shift side by side.
+    { shift: 'shared', start: '12:00', end: '18:00', people: [{ name: 'Rony', start: '12:00', end: '18:00' }, { name: 'Ayah', start: '12:00', end: '18:00' }] },
+    { shift: 'closing', start: '14:00', end: '21:00', people: [{ name: '', start: '14:00', end: '21:00' }, { name: 'Bad', start: '15:00', end: '14:00' }] },
+  ] }]
+  const { weekSchedule, weekShifts, problems } = workedFromDays(days)
+  eq('each person counts with their own hours', weekShifts.map((s) => [s.barista, s.start.getHours(), s.end.getHours()]),
+    [['Ayah', 8, 11], ['Philip', 11, 14], ['Rony', 12, 18], ['Ayah', 12, 18]])
+  eq('grouped by day', weekSchedule['2026-10-21'].length, 4)
+  eq('rows with no name or backwards hours are left out and listed', problems, [
+    '2026-10-21 closing: pick who worked it, or remove the empty row',
+    "2026-10-21 closing: Bad's hours need an end after the start",
+  ])
+}
 
 console.log(`\n${pass} passed, ${fail} failed`)
 process.exit(fail ? 1 : 0)

@@ -1,7 +1,7 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useMemo } from 'react'
 import { collection, addDoc, getDocs, query, orderBy, doc, updateDoc, deleteDoc, setDoc } from 'firebase/firestore'
 import { db } from '../firebase/config'
-import { fetchMasterWeek } from '../lib/masterSchedule'
+import { fetchMasterWeek, workedFromDays } from '../lib/masterSchedule'
 import BaristaStatementTab from './BaristaStatementTab'
 import '../styles/StaffTab.css'
 
@@ -19,16 +19,17 @@ function StaffTab({ user }) {
   const [tipInputMethod, setTipInputMethod] = useState('byHour') // byHour, bulk, manual
   const [bulkTipData, setBulkTipData] = useState('')
   const [dailyTips, setDailyTips] = useState({})
-  const [weekSchedule, setWeekSchedule] = useState(null)
   const [loading, setLoading] = useState(false)
   const [calculation, setCalculation] = useState(null)
   const [reports, setReports] = useState([])
   const [newBarista, setNewBarista] = useState({ name: '', basePay: '' })
   const [editingBarista, setEditingBarista] = useState(null)
   const [squareData, setSquareData] = useState('')
-  const [weekShifts, setWeekShifts] = useState([])
-  // The loaded week as the master schedule has it, and what looks wrong with it.
+  // The loaded week as the master schedule has it (loadedDays), the admin's copy
+  // of it for this tip calculation (scheduleDays - people can be added to a shift
+  // or their hours changed when a shift was split), and what looks wrong.
   // Tips can't be calculated until the admin confirms it matches who worked.
+  const [loadedDays, setLoadedDays] = useState([])
   const [scheduleDays, setScheduleDays] = useState([])
   const [scheduleIssues, setScheduleIssues] = useState([])
   const [scheduleConfirmed, setScheduleConfirmed] = useState(false)
@@ -148,6 +149,31 @@ function StaffTab({ user }) {
     }
   }
 
+  // Everyone on each shift with their own hours, from the (adjusted) preview.
+  const { weekSchedule, weekShifts, problems: scheduleProblems } = useMemo(
+    () => (scheduleDays.length ? workedFromDays(scheduleDays) : { weekSchedule: null, weekShifts: [], problems: [] }),
+    [scheduleDays]
+  )
+  // Shifts the admin changed from what the master schedule says, saved with the report.
+  const scheduleAdjustments = scheduleDays.flatMap((day, dayIndex) =>
+    day.shifts
+      .filter((shift, shiftIndex) => JSON.stringify(shift.people) !== JSON.stringify(loadedDays[dayIndex]?.shifts[shiftIndex]?.people))
+      .map(shift => ({ date: day.date, shift: shift.shift, people: shift.people }))
+  )
+  const openIssues = scheduleIssues.filter(issue =>
+    !issue.slot || !scheduleDays.some(day => day.shifts.some(shift => `${day.date}_${shift.shift}` === issue.slot && shift.people.length))
+  )
+
+  // Edits one shift's people in the preview. Any change needs a fresh confirm.
+  const changeShiftPeople = (date, shiftId, change) => {
+    setScheduleDays(days => days.map(day => day.date !== date ? day : {
+      ...day,
+      shifts: day.shifts.map(shift => shift.shift !== shiftId ? shift : { ...shift, people: change(shift.people, shift) }),
+    }))
+    setScheduleConfirmed(false)
+    setCalculation(null)
+  }
+
   const fetchWeekSchedule = async () => {
     if (!selectedWeek) {
       alert('Please select a week first')
@@ -157,9 +183,8 @@ function StaffTab({ user }) {
     setLoading(true)
     try {
       const weekStart = getSundayOfWeek(parseDateInput(selectedWeek))
-      const { weekSchedule, weekShifts, days, issues } = await fetchMasterWeek(db, weekStart, baristas)
-      setWeekSchedule(weekSchedule)
-      setWeekShifts(weekShifts)
+      const { days, issues } = await fetchMasterWeek(db, weekStart, baristas)
+      setLoadedDays(days)
       setScheduleDays(days)
       setScheduleIssues(issues)
       setScheduleConfirmed(false)
@@ -261,6 +286,10 @@ function StaffTab({ user }) {
     }
     if (weekShifts.length === 0) {
       alert('Please load the schedule from the master schedule first')
+      return
+    }
+    if (scheduleProblems.length > 0) {
+      alert('Finish or remove the half-filled rows in the schedule preview first')
       return
     }
     if (!scheduleConfirmed) {
@@ -501,6 +530,10 @@ function StaffTab({ user }) {
       alert('Please load schedule and enter tip data first')
       return
     }
+    if (scheduleProblems.length > 0) {
+      alert('Finish or remove the half-filled rows in the schedule preview first')
+      return
+    }
     if (!scheduleConfirmed) {
       alert('Please check the schedule and confirm it before calculating tips')
       return
@@ -653,6 +686,7 @@ function StaffTab({ user }) {
       await setDoc(doc(db, 'tipReports', docId), {
         ...calculation,
         scheduleSource: 'master-schedule',
+        scheduleAdjustments,
         scheduleConfirmedAt: new Date(),
         scheduleConfirmedBy: user.uid,
         createdAt: new Date(),
@@ -980,8 +1014,8 @@ function StaffTab({ user }) {
                 const sunday = getSundayOfWeek(parseDateInput(e.target.value))
                 setSelectedWeek(formatDateKey(sunday))
                 // A schedule loaded for another week must not be paid against this one
-                setWeekSchedule(null)
-                setWeekShifts([])
+                setLoadedDays([])
+                setScheduleDays([])
                 setScheduleConfirmed(false)
                 setCalculation(null)
               }}
@@ -999,8 +1033,56 @@ function StaffTab({ user }) {
                   <div key={day.date} className="day-schedule">
                     <strong>{parseDateInput(day.date).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })}</strong>
                     {day.shifts.map(shift => (
-                      <div key={shift.shift}>
-                        {shift.shift[0].toUpperCase() + shift.shift.slice(1)} ({formatClock(shift.start)}-{formatClock(shift.end)}{shift.custom ? ', changed hours' : ''}): {shift.name || 'None'}
+                      <div key={shift.shift} className="preview-shift">
+                        <div>
+                          {shift.shift[0].toUpperCase() + shift.shift.slice(1)} ({formatClock(shift.start)}-{formatClock(shift.end)}{shift.custom ? ', changed hours' : ''}):{' '}
+                          {shift.people.length === 0 && 'None'}
+                          <button
+                            type="button"
+                            className="preview-add-person"
+                            title="Someone else worked part or all of this shift"
+                            onClick={() => changeShiftPeople(day.date, shift.shift, (people, s) => [...people, { name: '', start: s.start, end: s.end }])}
+                          >
+                            + person
+                          </button>
+                        </div>
+                        {shift.people.map((person, index) => (
+                          <div key={index} className="preview-person">
+                            <select
+                              value={person.name}
+                              onChange={(e) => changeShiftPeople(day.date, shift.shift, people => people.map((p, i) => i === index ? { ...p, name: e.target.value } : p))}
+                            >
+                              <option value="">Who?</option>
+                              {person.name && !baristas.some(b => b.name === person.name) && <option value={person.name}>{person.name}</option>}
+                              {baristas.filter(b => b.active !== false || b.name === person.name).map(b => (
+                                <option key={b.id} value={b.name}>{b.name}</option>
+                              ))}
+                            </select>
+                            <input
+                              type="time"
+                              step="900"
+                              value={person.start}
+                              aria-label="Started"
+                              onChange={(e) => changeShiftPeople(day.date, shift.shift, people => people.map((p, i) => i === index ? { ...p, start: e.target.value } : p))}
+                            />
+                            <span>-</span>
+                            <input
+                              type="time"
+                              step="900"
+                              value={person.end}
+                              aria-label="Finished"
+                              onChange={(e) => changeShiftPeople(day.date, shift.shift, people => people.map((p, i) => i === index ? { ...p, end: e.target.value } : p))}
+                            />
+                            <button
+                              type="button"
+                              className="preview-remove-person"
+                              title="Remove from this shift (for the tip calculation only)"
+                              onClick={() => changeShiftPeople(day.date, shift.shift, people => people.filter((_, i) => i !== index))}
+                            >
+                              ✕
+                            </button>
+                          </div>
+                        ))}
                       </div>
                     ))}
                   </div>
@@ -1008,16 +1090,28 @@ function StaffTab({ user }) {
               </div>
 
               <div className="schedule-check">
-                {scheduleIssues.length > 0 ? (
+                <p className="by-hour-description">
+                  If two people split a shift - side by side, or one took over partway - use "+ person" and set each
+                  one's hours. Changes here only affect this tip calculation, not the schedule.
+                </p>
+                {openIssues.length + scheduleProblems.length > 0 ? (
                   <div className="unmatched-warning">
                     <strong>Check before paying out:</strong>
                     <ul>
-                      {scheduleIssues.map(issue => <li key={issue}>{issue}</li>)}
+                      {scheduleProblems.map(problem => <li key={problem}>{problem}</li>)}
+                      {openIssues.map(issue => <li key={issue.text}>{issue.text}</li>)}
                     </ul>
-                    <p>Fix anything wrong on the schedule, then load it again.</p>
                   </div>
                 ) : (
                   <p>No open shifts or unknown baristas this week.</p>
+                )}
+                {scheduleAdjustments.length > 0 && (
+                  <p>
+                    {scheduleAdjustments.length} shift{scheduleAdjustments.length === 1 ? '' : 's'} adjusted for this calculation.{' '}
+                    <button type="button" onClick={() => { setScheduleDays(loadedDays); setScheduleConfirmed(false); setCalculation(null) }}>
+                      Undo adjustments
+                    </button>
+                  </p>
                 )}
                 <label>
                   <input

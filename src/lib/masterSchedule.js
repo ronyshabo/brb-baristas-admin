@@ -25,16 +25,17 @@ const atTime = (key, time) => {
  * Turns one week of master-schedule docs into what the calculator uses, plus
  * the problems the admin should look at before paying anyone out.
  *
- *   weekSchedule - { date: [{ barista, start, end }] } that day's shifts
- *   weekShifts   - [{ barista, start, end }] every shift in the week, with real hours
- *   days         - [{ date, shifts: [{ shift, name, start, end, custom }] }] for the preview
- *   issues       - [string] open shifts, unknown or inactive baristas, $0 base pay
+ *   days         - [{ date, shifts: [{ shift, start, end, custom, people }] }] for the
+ *                  preview; people = [{ name, start, end }], the scheduled barista
+ *                  (none on an empty shift). The admin can add people to a shift
+ *                  or change their hours there before calculating - see workedFromDays.
+ *   weekSchedule, weekShifts - workedFromDays(days)
+ *   issues       - [{ slot, text }] open shifts, unknown or inactive baristas, $0 base
+ *                  pay; slot is `${date}_${shift}` (null for base pay)
  */
 export const buildWeek = ({ weekStart, assignments, savedHours, overrides, baristas }) => {
   const byId = new Map(baristas.map((barista) => [barista.id, barista]))
   const byShift = new Map(assignments.map((entry) => [`${entry.date}_${entry.shift}`, entry]))
-  const weekSchedule = {}
-  const weekShifts = []
   const days = []
   const issues = []
   const noBasePay = new Set()
@@ -45,7 +46,6 @@ export const buildWeek = ({ weekStart, assignments, savedHours, overrides, baris
     day.setDate(day.getDate() + offset)
     const key = dateKey(day)
     const label = day.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })
-    weekSchedule[key] = []
     const dayShifts = []
     // A middle (cover) shift only exists on days someone is on one.
     const assigned = { middle: byShift.has(`${key}_middle`) ? [byShift.get(`${key}_middle`)] : [] }
@@ -53,30 +53,65 @@ export const buildWeek = ({ weekStart, assignments, savedHours, overrides, baris
     for (const shift of shiftsOnDay(key, assigned)) {
       const times = timesFor(key, shift, hours, overrides)
       const entry = byShift.get(`${key}_${shift}`)
+      const slot = `${key}_${shift}`
       if (!entry) {
-        issues.push(`${label} ${shift}: nobody on this shift`)
-        dayShifts.push({ shift, name: null, ...times })
+        issues.push({ slot, text: `${label} ${shift}: nobody on this shift` })
+        dayShifts.push({ shift, ...times, people: [] })
         continue
       }
 
       // The staff record's name, so base pay and saved reports line up with it.
       const barista = byId.get(entry.baristaId)
       const name = barista?.name || entry.baristaName
-      if (!barista) issues.push(`${label} ${shift}: ${name} isn't in Manage Baristas`)
-      else if (barista.active === false) issues.push(`${label} ${shift}: ${name} is marked inactive`)
+      if (!barista) issues.push({ slot, text: `${label} ${shift}: ${name} isn't in Manage Baristas` })
+      else if (barista.active === false) issues.push({ slot, text: `${label} ${shift}: ${name} is marked inactive` })
       else if (!barista.basePay) noBasePay.add(name)
 
-      const worked = { barista: name, start: atTime(key, times.start), end: atTime(key, times.end) }
-      weekSchedule[key].push(worked)
-      weekShifts.push(worked)
-      dayShifts.push({ shift, name, ...times })
+      dayShifts.push({ shift, ...times, people: [{ name, start: times.start, end: times.end }] })
     }
 
     days.push({ date: key, shifts: dayShifts })
   }
 
-  noBasePay.forEach((name) => issues.push(`${name} has $0 base pay`))
-  return { weekSchedule, weekShifts, days, issues }
+  noBasePay.forEach((name) => issues.push({ slot: null, text: `${name} has $0 base pay` }))
+  return { ...workedFromDays(days), days, issues }
+}
+
+const TIME_PATTERN = /^([01]\d|2[0-3]):[0-5]\d$/
+
+/**
+ * Who worked when, from the (possibly adjusted) preview days. Everyone on a
+ * shift counts with their own hours, so two people splitting one shift - side
+ * by side, or one taking over halfway - each get their part. People with no
+ * name or hours that don't make sense are left out (and listed in `problems`).
+ *
+ *   weekSchedule - { date: [{ barista, start, end }] } that day's shifts
+ *   weekShifts   - [{ barista, start, end }] every shift in the week
+ *   problems     - [string]
+ */
+export const workedFromDays = (days) => {
+  const weekSchedule = {}
+  const weekShifts = []
+  const problems = []
+  for (const day of days) {
+    weekSchedule[day.date] = []
+    for (const shift of day.shifts) {
+      for (const person of shift.people) {
+        if (!person.name) {
+          problems.push(`${day.date} ${shift.shift}: pick who worked it, or remove the empty row`)
+          continue
+        }
+        if (!TIME_PATTERN.test(person.start) || !TIME_PATTERN.test(person.end) || person.start >= person.end) {
+          problems.push(`${day.date} ${shift.shift}: ${person.name}'s hours need an end after the start`)
+          continue
+        }
+        const worked = { barista: person.name, start: atTime(day.date, person.start), end: atTime(day.date, person.end) }
+        weekSchedule[day.date].push(worked)
+        weekShifts.push(worked)
+      }
+    }
+  }
+  return { weekSchedule, weekShifts, problems }
 }
 
 export const fetchMasterWeek = async (db, weekStart, baristas) => {
