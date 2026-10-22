@@ -3,7 +3,7 @@
 // Gmail (from the BRB account) or copies it, the same way the ACL invites go
 // out, so Firebase's email cap never gets in the way.
 
-import { SHIFTS, SHIFT_ORDER, formatDay, formatRange, groupAssignments, openShifts, parseDateKey, shiftsForDate, dateKey, timesFor as defaultTimesFor } from './shifts.js'
+import { DAY_ORDER, SHIFTS, formatDay, formatRange, groupAssignments, openShifts, parseDateKey, shiftsOnDay, dateKey, timesFor as defaultTimesFor } from './shifts.js'
 
 export const SCHEDULE_URL = 'https://schedule.brbcoffee-atx.com'
 
@@ -27,7 +27,7 @@ export const buildBroadcast = ({ assignments, baristas, startKey, endKey, timesF
   const dayLines = []
   for (let cursor = parseDateKey(startKey); dateKey(cursor) <= endKey; cursor.setDate(cursor.getDate() + 1)) {
     const key = dateKey(cursor)
-    const parts = SHIFT_ORDER.filter((shift) => shiftsForDate(key).includes(shift)).map((shift) => {
+    const parts = shiftsOnDay(key, byDate[key]).map((shift) => {
       const names = (byDate[key]?.[shift] || []).map((entry) => entry.baristaName)
       const hours = timesFor(key, shift)
       return `${SHIFTS[shift].label}${hours.custom ? ` (${formatRange(hours)})` : ''}: ${names.length ? names.join(', ') : 'OPEN'}`
@@ -38,7 +38,7 @@ export const buildBroadcast = ({ assignments, baristas, startKey, endKey, timesF
   const personLines = working.map((barista) => {
     const shifts = inRange
       .filter((entry) => entry.baristaId === barista.id)
-      .sort((left, right) => left.date.localeCompare(right.date) || SHIFT_ORDER.indexOf(left.shift) - SHIFT_ORDER.indexOf(right.shift))
+      .sort((left, right) => left.date.localeCompare(right.date) || DAY_ORDER.indexOf(left.shift) - DAY_ORDER.indexOf(right.shift))
       .map((entry) => `  • ${formatDay(entry.date)} — ${SHIFTS[entry.shift].label} (${formatRange(timesFor(entry.date, entry.shift))})`)
     return `${barista.name} (${shifts.length})\n${shifts.join('\n')}`
   })

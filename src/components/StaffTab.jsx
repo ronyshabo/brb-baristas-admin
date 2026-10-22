@@ -8,12 +8,9 @@ import '../styles/StaffTab.css'
 // A person paid $600+ in a calendar year needs a 1099-NEC (non-employee comp).
 const TAX_1099_THRESHOLD = 600
 
-// Tip-split weights for the daily-totals method, in hours. Hours worked are
-// counted from each shift's real times on the master schedule.
-const MORNING_HOURS = 6         // 8am - 2pm
-const EVENING_HOURS = 7         // 2pm - 9pm
-const INTER_MORNING_OVERLAP = 2 // the 12pm - 2pm part of an inter-shift
-const INTER_EVENING_OVERLAP = 4 // the 2pm - 6pm part of an inter-shift
+// The daily-totals method splits a day's tips into a pool before this hour
+// and a pool after it (opening hands over to closing at 2pm).
+const SPLIT_HOUR = 14
 
 function StaffTab({ user }) {
   const [view, setView] = useState('calculator') // calculator, baristas, reports, statements
@@ -450,22 +447,24 @@ function StaffTab({ user }) {
   }
 
   // Splits one day's tips into a morning pool and an evening pool, each divided by
-  // the hours a barista actually covered in that window. Weights are normalized
-  // inside the pool, so a day's shares always add up to exactly that day's tips:
-  // an inter-shift barista dilutes the other shares instead of being paid on top of
-  // an already-full split (which is what used to push payouts over 100%).
-  const allocateDayTips = (daySchedule, dayTip) => {
+  // the hours a barista actually covered in that window (from the shift's real
+  // times, so a 12-2 middle cover or a shortened opening counts exactly). Weights
+  // are normalized inside the pool, so a day's shares always add up to exactly
+  // that day's tips: a shared or middle barista dilutes the other shares instead
+  // of being paid on top of an already-full split.
+  const allocateDayTips = (dayShifts, dayTip) => {
     const morningWeights = {}
     const eveningWeights = {}
     const addWeight = (weights, name, hours) => {
-      weights[name] = (weights[name] || 0) + hours
+      if (hours > 0) weights[name] = (weights[name] || 0) + hours
     }
+    const hoursBetween = (from, to) => (to - from) / (1000 * 60 * 60)
 
-    daySchedule.morning.forEach(name => addWeight(morningWeights, name, MORNING_HOURS))
-    daySchedule.evening.forEach(name => addWeight(eveningWeights, name, EVENING_HOURS))
-    daySchedule.interShift.forEach(name => {
-      addWeight(morningWeights, name, INTER_MORNING_OVERLAP)
-      addWeight(eveningWeights, name, INTER_EVENING_OVERLAP)
+    dayShifts.forEach(shift => {
+      const split = new Date(shift.start)
+      split.setHours(SPLIT_HOUR, 0, 0, 0)
+      addWeight(morningWeights, shift.barista, hoursBetween(shift.start, Math.min(shift.end, split)))
+      addWeight(eveningWeights, shift.barista, hoursBetween(Math.max(shift.start, split), shift.end))
     })
 
     const sumWeights = (weights) => Object.values(weights).reduce((sum, weight) => sum + weight, 0)
@@ -520,11 +519,10 @@ function StaffTab({ user }) {
     let unallocatedDays = 0
 
     Object.keys(weekSchedule).forEach(date => {
-      const daySchedule = weekSchedule[date]
       const dayTip = dailyTips[date] || 0
       scheduledTips += dayTip
 
-      const { shares, unallocated } = allocateDayTips(daySchedule, dayTip)
+      const { shares, unallocated } = allocateDayTips(weekSchedule[date], dayTip)
       Object.entries(shares).forEach(([name, share]) => {
         earningsFor(name).tips += share
       })

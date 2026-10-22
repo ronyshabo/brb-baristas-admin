@@ -1,9 +1,10 @@
 import { useEffect, useState } from 'react'
-import { DAY_TYPES, DEFAULT_HOURS, SHIFTS, SHIFT_ORDER, formatRange, formatTime, isValidRange } from './shifts.js'
+import { DAY_ORDER, DAY_TYPES, DEFAULT_HOURS, SHIFTS, SHIFT_ORDER, formatRange, formatTime, isValidRange } from './shifts.js'
 import { saveDefaultHours } from './store'
 
 // Shared runs Fri-Sun and Friday uses weekday hours, so the weekday row's
-// Shared column is labelled "Fridays".
+// Shared column is labelled "Fridays". Middle is only used on days the admin
+// adds one, so gaps are checked over the regular shifts alone.
 const gapsIn = (dayHours) => {
   const ranges = SHIFT_ORDER.map((shift) => dayHours[shift]).filter(Boolean).sort((a, b) => a.start.localeCompare(b.start))
   const gaps = []
@@ -45,7 +46,7 @@ export default function DefaultHoursPanel({ hours }) {
           {Object.values(DAY_TYPES).map((dayType) => (
             <p key={dayType.id}>
               <strong>{dayType.label}:</strong>{' '}
-              {SHIFT_ORDER.map((shift) => (
+              {DAY_ORDER.map((shift) => (
                 <span key={shift} className={`sched-hours-chip sched-bubble-${shift}`}>
                   {SHIFTS[shift].label}{dayType.id === 'weekday' && shift === 'shared' ? ' (Fri)' : ''} {formatRange(hours[dayType.id][shift])}
                 </span>
@@ -65,7 +66,7 @@ export default function DefaultHoursPanel({ hours }) {
             <thead>
               <tr>
                 <th />
-                {SHIFT_ORDER.map((shift) => <th key={shift}>{SHIFTS[shift].label}</th>)}
+                {DAY_ORDER.map((shift) => <th key={shift}>{SHIFTS[shift].label}</th>)}
               </tr>
             </thead>
             <tbody>
@@ -77,7 +78,7 @@ export default function DefaultHoursPanel({ hours }) {
                       <span className="sched-gap-tag">nobody {gapsIn(draft[dayType.id]).join(', ')}</span>
                     )}
                   </th>
-                  {SHIFT_ORDER.map((shift) => {
+                  {DAY_ORDER.map((shift) => {
                     const range = draft[dayType.id][shift]
                     return (
                       <td key={shift} className={isValidRange(range) ? '' : 'is-invalid'}>
@@ -85,6 +86,7 @@ export default function DefaultHoursPanel({ hours }) {
                         <span>–</span>
                         <input type="time" step="900" value={range.end} onChange={(event) => setTime(dayType.id, shift, 'end', event.target.value)} aria-label={`${dayType.label} ${SHIFTS[shift].label} end`} />
                         {dayType.id === 'weekday' && shift === 'shared' && <small className="sched-muted">Fridays</small>}
+                        {shift === 'middle' && <small className="sched-muted">when added</small>}
                       </td>
                     )
                   })}

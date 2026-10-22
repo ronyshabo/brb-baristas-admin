@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { watchAssignments, watchBaristas, watchSettings, watchShiftTimes, watchUnavailability, watchWeekly, watchWriteErrors } from './store'
-import { groupAssignments, makeAvailability, resolveHours, timesFor } from './shifts.js'
+import { watchAssignments, watchBaristas, watchScheduleUsers, watchSettings, watchShiftTimes, watchUnavailability, watchWeekly, watchWriteErrors } from './store'
+import { baristaColors, groupAssignments, makeAvailability, resolveHours, timesFor } from './shifts.js'
 
 // Live baristas, shifts and availability, plus the lookups every view needs.
 export const useScheduleData = () => {
@@ -10,6 +10,7 @@ export const useScheduleData = () => {
   const [weekly, setWeekly] = useState(null)
   const [settings, setSettings] = useState(null)
   const [shiftTimes, setShiftTimes] = useState(null)
+  const [scheduleUsers, setScheduleUsers] = useState([])
   const [error, setError] = useState(null)
 
   useEffect(() => {
@@ -21,6 +22,8 @@ export const useScheduleData = () => {
       watchWeekly(setWeekly, onError),
       watchSettings(setSettings, onError),
       watchShiftTimes(setShiftTimes, onError),
+      // Only for name colours, so a failure here doesn't block the schedule.
+      watchScheduleUsers(setScheduleUsers, (err) => console.error('Could not load name colours', err)),
       watchWriteErrors((err) => setError(`Could not save: ${err?.message || 'unknown error'}`)),
     ]
     return () => stops.forEach((stop) => stop())
@@ -34,11 +37,14 @@ export const useScheduleData = () => {
     () => Object.fromEntries((shiftTimes || []).map((entry) => [`${entry.date}_${entry.shift}`, entry])),
     [shiftTimes]
   )
+  // baristaId -> hex, for barista-chosen name colours
+  const colors = useMemo(() => baristaColors(scheduleUsers, baristas || []), [scheduleUsers, baristas])
   // (date, shift) -> { start, end, custom }
   const shiftHours = useCallback((date, shift) => timesFor(date, shift, hours, overrides), [hours, overrides])
 
   return {
     loading: !baristas || !assignments || !unavailability || !weekly || !settings || !shiftTimes,
+    baristasLoaded: Boolean(baristas),
     error,
     clearError: () => setError(null),
     baristas: baristas || [],
@@ -49,5 +55,6 @@ export const useScheduleData = () => {
     availabilityOf,
     hours,
     timesFor: shiftHours,
+    colors,
   }
 }

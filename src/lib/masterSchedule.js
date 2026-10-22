@@ -12,10 +12,7 @@
  * masterSchedule.test.mjs can run it under plain node.
  */
 import { collection, doc, getDoc, getDocs, query, where } from 'firebase/firestore'
-import { dateKey, parseDateKey, resolveHours, shiftsForDate, timesFor } from '../schedule/shifts.js'
-
-// The tip calculator's names for the three shifts.
-const SLOT_FOR_SHIFT = { opening: 'morning', closing: 'evening', shared: 'interShift' }
+import { dateKey, parseDateKey, resolveHours, shiftsOnDay, timesFor } from '../schedule/shifts.js'
 
 const atTime = (key, time) => {
   const [hour, minute] = time.split(':').map(Number)
@@ -28,8 +25,8 @@ const atTime = (key, time) => {
  * Turns one week of master-schedule docs into what the calculator uses, plus
  * the problems the admin should look at before paying anyone out.
  *
- *   weekSchedule - { date: { morning: [name], evening: [name], interShift: [name] } }
- *   weekShifts   - [{ barista, start, end }] with each shift's real hours
+ *   weekSchedule - { date: [{ barista, start, end }] } that day's shifts
+ *   weekShifts   - [{ barista, start, end }] every shift in the week, with real hours
  *   days         - [{ date, shifts: [{ shift, name, start, end, custom }] }] for the preview
  *   issues       - [string] open shifts, unknown or inactive baristas, $0 base pay
  */
@@ -48,10 +45,12 @@ export const buildWeek = ({ weekStart, assignments, savedHours, overrides, baris
     day.setDate(day.getDate() + offset)
     const key = dateKey(day)
     const label = day.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })
-    weekSchedule[key] = { morning: [], evening: [], interShift: [] }
+    weekSchedule[key] = []
     const dayShifts = []
+    // A middle (cover) shift only exists on days someone is on one.
+    const assigned = { middle: byShift.has(`${key}_middle`) ? [byShift.get(`${key}_middle`)] : [] }
 
-    for (const shift of shiftsForDate(key)) {
+    for (const shift of shiftsOnDay(key, assigned)) {
       const times = timesFor(key, shift, hours, overrides)
       const entry = byShift.get(`${key}_${shift}`)
       if (!entry) {
@@ -67,8 +66,9 @@ export const buildWeek = ({ weekStart, assignments, savedHours, overrides, baris
       else if (barista.active === false) issues.push(`${label} ${shift}: ${name} is marked inactive`)
       else if (!barista.basePay) noBasePay.add(name)
 
-      weekSchedule[key][SLOT_FOR_SHIFT[shift]].push(name)
-      weekShifts.push({ barista: name, start: atTime(key, times.start), end: atTime(key, times.end) })
+      const worked = { barista: name, start: atTime(key, times.start), end: atTime(key, times.end) }
+      weekSchedule[key].push(worked)
+      weekShifts.push(worked)
       dayShifts.push({ shift, name, ...times })
     }
 

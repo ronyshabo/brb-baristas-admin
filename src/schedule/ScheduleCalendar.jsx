@@ -1,9 +1,9 @@
 import { useEffect, useRef } from 'react'
-import { SHIFTS, WEEKDAY_HEADERS, coverageGaps, dateKey, formatRange, formatTime, isShiftOpen, monthGrid, parseDateKey, shiftsForDate } from './shifts.js'
+import { SHIFTS, WEEKDAY_HEADERS, coverageGaps, dateKey, formatRange, formatTime, isShiftOpen, monthGrid, parseDateKey, shiftsOnDay } from './shifts.js'
 
 // One shift on one day. The heading opens the shift; each name opens it with
 // that person picked, so they can be moved, swapped or removed.
-function ShiftBubble({ date, shift, hours, assigned, myId, past, onPick, nobodyFree }) {
+function ShiftBubble({ date, shift, hours, assigned, myId, past, onPick, nobodyFree, colors }) {
   const open = isShiftOpen(assigned)
   const mine = myId && assigned.some((entry) => entry.baristaId === myId)
   const classes = ['sched-bubble', `sched-bubble-${shift}`, open && 'is-open', mine && 'is-mine', past && 'is-past']
@@ -31,7 +31,8 @@ function ShiftBubble({ date, shift, hours, assigned, myId, past, onPick, nobodyF
             <li key={entry.id}>
               <button
                 type="button"
-                className={`sched-name ${entry.baristaId === myId ? 'is-me' : ''}`}
+                className={`sched-name ${entry.baristaId === myId ? 'is-me' : ''} ${colors?.[entry.baristaId] ? 'has-color' : ''}`}
+                style={colors?.[entry.baristaId] ? { '--who': colors[entry.baristaId] } : undefined}
                 onClick={(event) => { event.stopPropagation(); onPick(date, shift, entry.baristaId) }}
               >
                 {entry.baristaName}
@@ -46,7 +47,8 @@ function ShiftBubble({ date, shift, hours, assigned, myId, past, onPick, nobodyF
 
 /**
  * The month grid. Each day: Opening on top, Closing below, and on shared days
- * (Fri-Sun) a Shared bubble to their right, centred between them. Weekend
+ * (Fri-Sun) a Shared bubble to their right, centred between them. A Middle
+ * shift, when someone is on one, sits between Opening and Closing. Weekend
  * columns are wider so full names fit; on phones the grid becomes a list.
  *
  * onPick(date, shift, baristaId?) - baristaId when a name was tapped
@@ -56,8 +58,10 @@ function ShiftBubble({ date, shift, hours, assigned, myId, past, onPick, nobodyF
  * timesFor  - (date, shift) -> { start, end, custom }
  * showGaps  - admin: flag days where adjusted hours leave nobody on
  * freeCount - admin: (date, shift) -> how many baristas can do it; 0 flags an empty shift
+ * addMiddle - admin: shows "+ Middle" on days without one (it opens the picker)
+ * colors    - { baristaId: hex } the colours baristas picked for their names
  */
-export default function ScheduleCalendar({ month, assignmentsByDate, onPick, myId, offDates, lockPast, timesFor, showGaps, freeCount }) {
+export default function ScheduleCalendar({ month, assignmentsByDate, onPick, myId, offDates, lockPast, timesFor, showGaps, freeCount, addMiddle, colors }) {
   const weeks = monthGrid(month.getFullYear(), month.getMonth())
   const todayKey = dateKey(new Date())
   const todayRef = useRef(null)
@@ -79,13 +83,14 @@ export default function ScheduleCalendar({ month, assignmentsByDate, onPick, myI
         <div className="sched-week" key={index}>
           {week.map((key, column) => {
             if (!key) return <div key={`empty-${column}`} className="sched-day is-empty" />
-            const shifts = shiftsForDate(key)
-            const past = lockPast && key < todayKey
             const day = assignmentsByDate[key] || {}
-            const gaps = showGaps ? coverageGaps(key, timesFor) : []
+            const shifts = shiftsOnDay(key, day)
+            const past = lockPast && key < todayKey
+            const gaps = showGaps ? coverageGaps(key, timesFor, shifts) : []
             const classes = [
               'sched-day',
               shifts.includes('shared') && 'has-shared',
+              shifts.includes('middle') && 'has-middle',
               key === todayKey && 'is-today',
               past && 'is-past',
               offDates?.has(key) && 'is-off',
@@ -106,6 +111,16 @@ export default function ScheduleCalendar({ month, assignmentsByDate, onPick, myI
                       nobody {gaps.map((gap) => `${formatTime(gap.start)}–${formatTime(gap.end)}`).join(', ')}
                     </span>
                   )}
+                  {addMiddle && !shifts.includes('middle') && key >= todayKey && (
+                    <button
+                      type="button"
+                      className="sched-add-middle"
+                      title="Add a middle shift (someone covering between opening and closing)"
+                      onClick={() => onPick(key, 'middle')}
+                    >
+                      + Middle
+                    </button>
+                  )}
                 </div>
                 <div className="sched-day-bubbles">
                   {shifts.map((shift) => (
@@ -119,6 +134,7 @@ export default function ScheduleCalendar({ month, assignmentsByDate, onPick, myI
                       myId={myId}
                       past={past}
                       onPick={onPick}
+                      colors={colors}
                     />
                   ))}
                 </div>

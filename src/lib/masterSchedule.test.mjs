@@ -34,25 +34,32 @@ assignments.push(shift('2026-10-23', 'shared', 'b', 'Ben'))
 assignments.push(shift('2026-10-24', 'shared', 'z', 'Zed'))
 // Sunday's shared goes to an inactive barista.
 assignments.push(shift('2026-10-18', 'shared', 'c', 'Cy'))
+// Thu: the opener leaves at noon and Ben covers 12-2.
+assignments.push(shift('2026-10-22', 'middle', 'b', 'Ben'))
 
 console.log('buildWeek')
 const week = buildWeek({
   weekStart,
   assignments,
   savedHours: { weekday: { closing: { start: '15:00', end: '21:00' } } },
-  overrides: { '2026-10-19_opening': { start: '07:00', end: '13:00' } },
+  overrides: { '2026-10-19_opening': { start: '07:00', end: '13:00' }, '2026-10-22_opening': { start: '08:00', end: '12:00' } },
   baristas,
 })
 
 eq('seven days', Object.keys(week.weekSchedule), [
   '2026-10-18', '2026-10-19', '2026-10-20', '2026-10-21', '2026-10-22', '2026-10-23', '2026-10-24',
 ])
-eq('uses the staff-record name, not the one saved on the shift', week.weekSchedule['2026-10-21'].morning, ['Ana Lopez'])
-eq('shared lands in interShift', week.weekSchedule['2026-10-23'].interShift, ['Ben'])
-eq('unknown barista still keeps the shift name', week.weekSchedule['2026-10-24'].interShift, ['Zed'])
+const names = (date) => week.weekSchedule[date].map((s) => s.barista)
+eq('uses the staff-record name, not the one saved on the shift', names('2026-10-21'), ['Ana Lopez', 'Ana Lopez'])
+eq('Fri: opening, shared, closing', names('2026-10-23'), ['Ana Lopez', 'Ben', 'Ana Lopez'])
+eq('unknown barista still keeps the shift name', names('2026-10-24').includes('Zed'), true)
+eq('middle shift counted with its real hours', week.weekSchedule['2026-10-22'].map((s) => [s.barista, s.start.getHours(), s.end.getHours()]), [
+  ['Ana Lopez', 8, 12], ['Ben', 12, 14], ['Ana Lopez', 15, 21],
+])
 
 const ana = week.weekShifts.filter((s) => s.barista === 'Ana Lopez')
 eq('Ana works 13 shifts', ana.length, 13)
+eq('an empty middle is not an open shift', week.issues.some((issue) => issue.includes('middle')), false)
 eq('weekend opening is 9am - 2pm', hours(ana.find((s) => s.start.getDate() === 18 && s.start.getHours() === 9)), 5)
 eq('one-day override wins', [ana.find((s) => s.start.getDate() === 19).start.getHours(), ana.find((s) => s.start.getDate() === 19).end.getHours()], [7, 13])
 eq('saved weekday closing hours apply', hours(ana.find((s) => s.start.getDate() === 21 && s.start.getHours() === 15)), 6)
