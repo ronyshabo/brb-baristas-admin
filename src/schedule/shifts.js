@@ -305,57 +305,51 @@ export const conflicts = ({ assignments, availabilityOf }) =>
     .filter((entry) => !entry.availability.ok)
     .map((entry) => ({ ...entry, reason: entry.availability.reason }))
 
-// ---- auto-fill ----
+// ---- fill my schedule ----
+
+// The Monday that starts the week of `key` (weeks run Mon-Sun, like the calendar).
+export const weekStartOf = (key) => {
+  const date = parseDateKey(key)
+  date.setDate(date.getDate() - ((date.getDay() + 6) % 7))
+  return dateKey(date)
+}
 
 /**
- * Proposes a barista for every empty shift in [startKey, endKey], using only
- * who is free for it. Shifts someone already has are never touched.
+ * A barista signing themselves up for empty shifts in [startKey, endKey].
+ * Takes only shifts nobody has and that they said they can do, never two on
+ * one day, and at most `maxPerWeek` shifts in any Mon-Sun week - counting the
+ * shifts they already have that week. Earliest shifts first.
  *
- * Shifts go day by day, opening and closing before shared, so if anyone is
- * left without a shift it is the optional shared one. Each shift goes to an
- * active barista who is free for it and not already working that day; among
- * those, whoever has the fewest shifts in the range so far (existing ones
- * count), then the fewest of this shift type, then by name.
- *
- * Returns { proposals: [{ date, shift, baristaId, baristaName }],
- *           unfilled: [{ date, shift }],
- *           counts: { baristaId: shifts in the range after filling } }
+ * Returns { picks: [{ date, shift }], heldBack } - heldBack is how many more
+ * days they could have worked without the weekly limit.
  */
-export const autoFill = ({ baristas, startKey, endKey, assignmentsByDate, availabilityOf }) => {
-  const active = baristas
-    .filter((barista) => barista.active !== false)
-    .sort((left, right) => left.name.localeCompare(right.name))
-  const total = {}
-  const byShift = {}
-  const working = {} // date -> Set of baristaIds on any shift that day
-  const count = (date, shift, baristaId) => {
-    total[baristaId] = (total[baristaId] || 0) + 1
-    byShift[`${baristaId}_${shift}`] = (byShift[`${baristaId}_${shift}`] || 0) + 1
-    ;(working[date] ||= new Set()).add(baristaId)
-  }
-
+export const fillMine = ({ baristaId, startKey, endKey, assignmentsByDate, availabilityOf, maxPerWeek }) => {
+  const perWeek = {}
+  const busyDays = new Set()
   for (const [date, day] of Object.entries(assignmentsByDate)) {
-    if (date < startKey || date > endKey) continue
-    for (const [shift, list] of Object.entries(day)) list.forEach((entry) => count(date, shift, entry.baristaId))
+    for (const list of Object.values(day)) {
+      for (const entry of list) {
+        if (entry.baristaId !== baristaId) continue
+        busyDays.add(date)
+        perWeek[weekStartOf(date)] = (perWeek[weekStartOf(date)] || 0) + 1
+      }
+    }
   }
 
-  const proposals = []
-  const unfilled = []
+  const picks = []
+  const heldBackDays = new Set()
   for (const { date, shift } of openShifts({ startKey, endKey, assignmentsByDate })) {
-    const pick = active
-      .filter((barista) => !working[date]?.has(barista.id) && availabilityOf(barista.id, date, shift).ok)
-      .sort((left, right) =>
-        (total[left.id] || 0) - (total[right.id] || 0)
-        || (byShift[`${left.id}_${shift}`] || 0) - (byShift[`${right.id}_${shift}`] || 0))[0]
-    if (!pick) {
-      unfilled.push({ date, shift })
+    if (busyDays.has(date) || !availabilityOf(baristaId, date, shift).ok) continue
+    const week = weekStartOf(date)
+    if ((perWeek[week] || 0) >= maxPerWeek) {
+      heldBackDays.add(date)
       continue
     }
-    proposals.push({ date, shift, baristaId: pick.id, baristaName: pick.name })
-    count(date, shift, pick.id)
+    picks.push({ date, shift })
+    perWeek[week] = (perWeek[week] || 0) + 1
+    busyDays.add(date)
   }
-
-  return { proposals, unfilled, counts: total }
+  return { picks, heldBack: heldBackDays.size }
 }
 
 // ---- barista colours ----

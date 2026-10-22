@@ -7,7 +7,7 @@ import DefaultHoursPanel from './DefaultHoursPanel'
 import { useScheduleData } from './useScheduleData'
 import { assignShift, moveShift, replaceShift, resetShiftTimes, setBaristaEmail, setShiftTimes, unassignShift } from './store'
 import { buildBroadcast, gmailComposeUrl } from './broadcast.js'
-import { REASON_LABELS, SHIFTS, autoFill, conflicts, coverageGaps, freeFor, dateKey, dayTypeFor, formatDay, openShifts, pickerLists, shiftsOnDay } from './shifts.js'
+import { REASON_LABELS, SHIFTS, conflicts, coverageGaps, freeFor, dateKey, dayTypeFor, formatDay, openShifts, pickerLists, shiftsOnDay } from './shifts.js'
 import './schedule.css'
 
 // The Gmail account the broadcast opens in, so it goes out from the shop.
@@ -149,115 +149,6 @@ function BroadcastPanel({ data, month }) {
   )
 }
 
-// Fills every empty shift from today to a chosen date with someone free for it.
-// Shows the plan first; nothing is saved until "Fill these shifts".
-function AutoFillPanel({ data, onPick }) {
-  const todayKey = dateKey(new Date())
-  const [endKey, setEndKey] = useState(() => addDays(todayKey, 13))
-  const [saving, setSaving] = useState(null) // { done, total } while writing
-
-  const plan = useMemo(
-    () => (endKey >= todayKey
-      ? autoFill({ baristas: data.baristas, startKey: todayKey, endKey, assignmentsByDate: data.assignmentsByDate, availabilityOf: data.availabilityOf })
-      : null),
-    [data.baristas, data.assignmentsByDate, data.availabilityOf, todayKey, endKey]
-  )
-  const names = Object.fromEntries(data.baristas.map((barista) => [barista.id, barista.name]))
-
-  const fill = async () => {
-    const { proposals } = plan
-    if (!window.confirm(`Put baristas on ${proposals.length} empty shift${proposals.length === 1 ? '' : 's'} through ${formatDay(endKey)}?`)) return
-    let filled = 0
-    setSaving({ done: 0, total: proposals.length })
-    for (const [index, entry] of proposals.entries()) {
-      // One at a time: a shift someone took meanwhile fails on its own and the rest go on.
-      if (await assignShift(entry.date, entry.shift, { id: entry.baristaId, name: entry.baristaName }, 'auto-fill')) filled += 1
-      setSaving({ done: index + 1, total: proposals.length })
-    }
-    setSaving(null)
-    alert(`Filled ${filled} of ${proposals.length} shifts.`)
-  }
-
-  return (
-    <section className="sched-panel">
-      <h3>Auto-fill</h3>
-      <p className="sched-muted">
-        Puts someone on every empty shift from today to the date below, using only who said they're free. Shifts that
-        already have someone stay as they are. Nobody gets two shifts on one day, and shifts go to whoever has the fewest
-        so far.
-      </p>
-
-      <div className="sched-range">
-        <span className="sched-range-custom">
-          Today to
-          <input type="date" min={todayKey} value={endKey} onChange={(event) => setEndKey(event.target.value)} />
-        </span>
-        <button type="button" className="sched-link-btn" onClick={() => setEndKey(addDays(todayKey, 6))}>1 week</button>
-        <button type="button" className="sched-link-btn" onClick={() => setEndKey(addDays(todayKey, 13))}>2 weeks</button>
-        <button type="button" className="sched-link-btn" onClick={() => setEndKey(addDays(todayKey, 27))}>4 weeks</button>
-      </div>
-
-      {!plan ? (
-        <p className="sched-warning">Pick a date from today on.</p>
-      ) : plan.proposals.length === 0 && plan.unfilled.length === 0 ? (
-        <p className="sched-muted">Every shift through {formatDay(endKey)} already has someone.</p>
-      ) : (
-        <>
-          <p>
-            <strong>{plan.proposals.length}</strong> empty shift{plan.proposals.length === 1 ? '' : 's'} can be filled
-            {plan.unfilled.length > 0 && <> · <span className="sched-open-text">{plan.unfilled.length} with nobody free</span></>}
-          </p>
-
-          {plan.proposals.length > 0 && (
-            <>
-              <p className="sched-muted">
-                Shifts each person will have through {formatDay(endKey)}:{' '}
-                {Object.entries(plan.counts)
-                  .map(([id, total]) => [names[id] || '?', total])
-                  .sort((left, right) => right[1] - left[1] || left[0].localeCompare(right[0]))
-                  .map(([name, total]) => `${name} ${total}`)
-                  .join(' · ')}
-              </p>
-              <details>
-                <summary>See every shift it will fill</summary>
-                <ul className="sched-clash-list">
-                  {plan.proposals.map((entry) => (
-                    <li key={`${entry.date}_${entry.shift}`}>
-                      <span>{formatDay(entry.date)} · {SHIFTS[entry.shift].label}</span>
-                      <strong>{entry.baristaName}</strong>
-                    </li>
-                  ))}
-                </ul>
-              </details>
-            </>
-          )}
-
-          {plan.unfilled.length > 0 && (
-            <>
-              <p className="sched-muted">Nobody free (or everyone free is already working that day) — fill these by hand:</p>
-              <ul className="sched-open-list">
-                {plan.unfilled.map((entry) => (
-                  <li key={`${entry.date}_${entry.shift}`}>
-                    <button type="button" className={`sched-open-chip sched-bubble-${entry.shift}`} onClick={() => onPick(entry)}>
-                      {formatDay(entry.date)} · {SHIFTS[entry.shift].label}
-                    </button>
-                  </li>
-                ))}
-              </ul>
-            </>
-          )}
-
-          <div className="sched-actions">
-            <button type="button" className="sched-btn sched-btn-primary" onClick={fill} disabled={!plan.proposals.length || Boolean(saving)}>
-              {saving ? `Filling… ${saving.done} / ${saving.total}` : 'Fill these shifts'}
-            </button>
-          </div>
-        </>
-      )}
-    </section>
-  )
-}
-
 export default function AdminScheduleTab() {
   const data = useScheduleData()
   const [month, setMonth] = useState(() => {
@@ -354,8 +245,6 @@ export default function AdminScheduleTab() {
           )}
         </section>
       </div>
-
-      <AutoFillPanel data={data} onPick={setPicking} />
 
       <DefaultHoursPanel hours={data.hours} />
 
