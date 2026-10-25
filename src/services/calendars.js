@@ -12,6 +12,11 @@ const legacyCalendarId = import.meta.env.VITE_GOOGLE_CALENDAR_ID || ''
 export const SCHEDULE_CALENDAR_ID = import.meta.env.VITE_GOOGLE_SCHEDULE_CALENDAR_ID || legacyCalendarId
 export const EVENTS_CALENDAR_ID = import.meta.env.VITE_GOOGLE_EVENTS_CALENDAR_ID || legacyCalendarId
 
+// Off: band events live only in Firestore. The app never writes, edits, or
+// deletes anything on the events calendar, and the calendar check skips it.
+// Set to true only if this app should write to the events calendar again.
+export const EVENTS_CALENDAR_SYNC_ENABLED = false
+
 // Where an event lives if its Firestore doc predates googleCalendarId.
 export const LEGACY_EVENTS_CALENDAR_ID = legacyCalendarId || SCHEDULE_CALENDAR_ID
 

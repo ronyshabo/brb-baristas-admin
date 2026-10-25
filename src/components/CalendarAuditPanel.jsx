@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import {
+  EVENTS_CALENDAR_SYNC_ENABLED,
   moveEventToEventsCalendar,
   pushEventToCalendar,
   removeEventFromCalendar,
@@ -84,7 +85,7 @@ function CalendarAuditPanel({ audit, accessToken }) {
         <button onClick={run} disabled={running}>{running ? 'Checking...' : 'Run check'}</button>
       </div>
 
-      {result && !result.calendarsSeparated && (
+      {EVENTS_CALENDAR_SYNC_ENABLED && result && !result.calendarsSeparated && (
         <p className="audit-warning">
           Events and the barista schedule still share one calendar. Set VITE_GOOGLE_EVENTS_CALENDAR_ID
           to the new events calendar so outside additions can be detected.

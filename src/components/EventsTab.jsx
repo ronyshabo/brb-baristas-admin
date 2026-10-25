@@ -4,6 +4,7 @@ import { db } from '../firebase/config'
 import { v4 as uuidv4 } from 'uuid'
 import { signInWithGoogleCalendar } from '../firebase/googleAuth'
 import {
+  EVENTS_CALENDAR_SYNC_ENABLED,
   approveEvent,
   isApprovedEvent,
   createCalendarEventRecord,
@@ -230,7 +231,7 @@ function EventsTab({ user, accessToken, setAccessToken, audit }) {
           const customId = `${dateValue}_${startTime.replace(':', '')}`
           let calendarRecord = { googleCalendarEventId: null }
 
-          if (accessToken) {
+          if (EVENTS_CALENDAR_SYNC_ENABLED && accessToken) {
             try {
               calendarRecord = await createCalendarEventRecord(
                 {
@@ -277,7 +278,7 @@ function EventsTab({ user, accessToken, setAccessToken, audit }) {
       setFormData(getInitialFormData())
       setShowForm(false)
 
-      if (!accessToken) {
+      if (EVENTS_CALENDAR_SYNC_ENABLED && !accessToken) {
         alert('Event created. Log in with Google to auto-add future events to Calendar.')
       } else if (calendarFailedCount > 0) {
         alert(`Created ${createdEvents.length} event(s). Synced ${calendarSyncedCount} to Google Calendar, ${calendarFailedCount} failed.`)
@@ -335,7 +336,7 @@ function EventsTab({ user, accessToken, setAccessToken, audit }) {
 
       await updateDoc(doc(db, 'events', editingEvent.id), eventData)
 
-      if (editingEvent.googleCalendarEventId) {
+      if (EVENTS_CALENDAR_SYNC_ENABLED && editingEvent.googleCalendarEventId) {
         if (accessToken) {
           try {
             const calendarUpdates = await pushEventToCalendar({ ...editingEvent, ...eventData }, accessToken)
@@ -374,7 +375,7 @@ function EventsTab({ user, accessToken, setAccessToken, audit }) {
       
       // Remove the Google entry first. If that cannot happen, keep the doc: a
       // deleted doc with a live Google entry is an event that only phones show.
-      if (event?.googleCalendarEventId) {
+      if (EVENTS_CALENDAR_SYNC_ENABLED && event?.googleCalendarEventId) {
         try {
           await deleteCalendarEvent(event, accessToken)
         } catch (err) {
@@ -680,7 +681,7 @@ function EventsTab({ user, accessToken, setAccessToken, audit }) {
         </button>
       </div>
 
-      {!accessToken && (
+      {EVENTS_CALENDAR_SYNC_ENABLED && !accessToken && (
         <div className="google-connect-banner">
           <p>
             Google Calendar is not connected, so approving an event will publish it to the
@@ -995,9 +996,11 @@ function EventsTab({ user, accessToken, setAccessToken, audit }) {
                     <span className={entry.publishedToWebsite ? 'destination-ok' : 'destination-missing'}>
                       {entry.publishedToWebsite ? 'On website' : 'Hidden from website'}
                     </span>
-                    <span className={entry.missingFromCalendar ? 'destination-missing' : 'destination-ok'}>
-                      {entry.missingFromCalendar ? 'Not on Google Calendar' : 'On Google Calendar'}
-                    </span>
+                    {EVENTS_CALENDAR_SYNC_ENABLED && (
+                      <span className={entry.missingFromCalendar ? 'destination-missing' : 'destination-ok'}>
+                        {entry.missingFromCalendar ? 'Not on Google Calendar' : 'On Google Calendar'}
+                      </span>
+                    )}
                   </div>
                 )}
                 <div className="event-actions" onClick={e => e.stopPropagation()}>

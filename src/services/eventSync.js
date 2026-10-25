@@ -3,6 +3,7 @@ import { db } from '../firebase/config'
 import {
   CALENDAR_TIME_ZONE,
   EVENTS_CALENDAR_ID,
+  EVENTS_CALENDAR_SYNC_ENABLED,
   LEGACY_EVENTS_CALENDAR_ID,
   calendarRequest,
   isGoneError,
@@ -15,6 +16,15 @@ import {
 // The events calendar, not the barista schedule calendar - see ./calendars.js.
 export const calendarId = EVENTS_CALENDAR_ID
 export const calendarTimeZone = CALENDAR_TIME_ZONE
+export { EVENTS_CALENDAR_SYNC_ENABLED }
+
+// Last line of defence: callers check the switch first, so this only fires if
+// something new forgets to.
+const assertSyncEnabled = () => {
+  if (!EVENTS_CALENDAR_SYNC_ENABLED) {
+    throw new Error('Google Calendar sync for events is turned off.')
+  }
+}
 
 // This app writes 'booked' on approval; the band portal in brb-events writes and
 // reads 'approved'. The website accepts either, so treat both as approved here
@@ -55,6 +65,7 @@ const buildCalendarResource = (event) => ({
 })
 
 const assertCanWrite = (event, accessToken) => {
+  assertSyncEnabled()
   if (!calendarId) {
     throw new Error('Missing Google Calendar configuration. Set VITE_GOOGLE_EVENTS_CALENDAR_ID.')
   }
@@ -124,7 +135,7 @@ export const pushEventToCalendar = async (event, accessToken) => {
 
 // Removes an event's Google entry. An entry that is already gone counts as done.
 export const deleteCalendarEvent = async (event, accessToken) => {
-  if (!event.googleCalendarEventId) return
+  if (!EVENTS_CALENDAR_SYNC_ENABLED || !event.googleCalendarEventId) return
   if (!accessToken) {
     throw new Error('Google Calendar is not connected, so the calendar entry cannot be removed.')
   }
@@ -143,6 +154,7 @@ export const deleteCalendarEvent = async (event, accessToken) => {
 // Takes an event off Google but keeps the doc, e.g. a rejected booking that
 // was still showing on everyone's phone.
 export const removeEventFromCalendar = async (event, accessToken) => {
+  assertSyncEnabled()
   await deleteCalendarEvent(event, accessToken)
   const updates = {
     googleCalendarEventId: null,
@@ -159,6 +171,7 @@ export const removeEventFromCalendar = async (event, accessToken) => {
 // events calendar. Google keeps the same event ID, so phones see a move rather
 // than a delete and a new entry.
 export const moveEventToEventsCalendar = async (event, accessToken) => {
+  assertSyncEnabled()
   const sourceCalendarId = calendarIdForEvent(event)
   if (!event.googleCalendarEventId || sourceCalendarId === calendarId) return null
   if (!accessToken) throw new Error('Google Calendar is not connected. Reconnect and try again.')
@@ -177,7 +190,7 @@ export const moveEventToEventsCalendar = async (event, accessToken) => {
 // An approved event that never reached the calendar. These used to be invisible:
 // approving without a Google token skipped the calendar write without saying so.
 export const isMissingFromCalendar = (event) =>
-  isApprovedEvent(event) && !event.googleCalendarEventId
+  EVENTS_CALENDAR_SYNC_ENABLED && isApprovedEvent(event) && !event.googleCalendarEventId
 
 export const isPublishedToWebsite = (event) =>
   isApprovedEvent(event) && event.showOnWebsite !== false
@@ -190,7 +203,7 @@ export const approveEvent = async (event, accessToken, extraFields = {}) => {
   let calendarRecord = {}
   let calendarError = null
 
-  if (!googleCalendarEventId) {
+  if (EVENTS_CALENDAR_SYNC_ENABLED && !googleCalendarEventId) {
     try {
       calendarRecord = await createCalendarEventRecord(event, accessToken)
       googleCalendarEventId = calendarRecord.googleCalendarEventId
@@ -208,7 +221,7 @@ export const approveEvent = async (event, accessToken, extraFields = {}) => {
     // approved straight into invisibility.
     showOnWebsite: true,
     googleCalendarEventId,
-    calendarSyncStatus: googleCalendarEventId ? 'synced' : 'failed',
+    calendarSyncStatus: !EVENTS_CALENDAR_SYNC_ENABLED ? 'off' : googleCalendarEventId ? 'synced' : 'failed',
     calendarSyncError: calendarError,
     calendarSyncedAt: googleCalendarEventId ? new Date() : null,
     ...calendarRecord,
@@ -244,7 +257,7 @@ export const publishEventToWebsite = async (event) => {
 // the calendar check to flag.
 export const rejectEvent = async (event, extraFields = {}, accessToken = null) => {
   const updates = { status: 'rejected', rejectedAt: new Date(), showOnWebsite: false, ...extraFields }
-  if (event.googleCalendarEventId && accessToken) {
+  if (EVENTS_CALENDAR_SYNC_ENABLED && event.googleCalendarEventId && accessToken) {
     await deleteCalendarEvent(event, accessToken)
     Object.assign(updates, {
       googleCalendarEventId: null,
@@ -260,6 +273,9 @@ export const rejectEvent = async (event, extraFields = {}, accessToken = null) =
 // One line summarizing what actually happened, for the alert after a batch.
 export const summarizeApprovals = (results) => {
   const approved = results.length
+  if (!EVENTS_CALENDAR_SYNC_ENABLED) {
+    return `Approved ${approved} event${approved === 1 ? '' : 's'} — published to the website.`
+  }
   const failures = results.filter((result) => !result.calendarSynced)
   if (failures.length === 0) {
     return `Approved ${approved} event${approved === 1 ? '' : 's'} — published to the website and added to Google Calendar.`
