@@ -3,6 +3,7 @@ import { db } from '../firebase/config'
 import {
   CALENDAR_TIME_ZONE,
   EVENTS_CALENDAR_ID,
+  EVENTS_CALENDAR_SYNC_ENABLED,
   LEGACY_EVENTS_CALENDAR_ID,
   SCHEDULE_CALENDAR_ID,
   calendarsAreSeparated,
@@ -76,7 +77,10 @@ export const runCalendarAudit = async (accessToken, { adminEmail } = {}) => {
   const baristaNames = baristasSnap.docs.map((entry) => entry.data().name).filter(Boolean)
 
   // Fetch each distinct calendar once; before the split they are all the same.
-  const calendarIds = [...new Set([EVENTS_CALENDAR_ID, SCHEDULE_CALENDAR_ID, LEGACY_EVENTS_CALENDAR_ID].filter(Boolean))]
+  // With events sync off, only the barista schedule calendar is read.
+  const calendarIds = EVENTS_CALENDAR_SYNC_ENABLED
+    ? [...new Set([EVENTS_CALENDAR_ID, SCHEDULE_CALENDAR_ID, LEGACY_EVENTS_CALENDAR_ID].filter(Boolean))]
+    : [SCHEDULE_CALENDAR_ID].filter(Boolean)
   const listings = new Map(
     await Promise.all(
       calendarIds.map(async (calendarId) => [
@@ -95,6 +99,7 @@ export const runCalendarAudit = async (accessToken, { adminEmail } = {}) => {
   // deleted long ago) are fetched one by one so they are not mistaken for gone.
   const unresolved = firestoreEvents.filter(
     (event) =>
+      EVENTS_CALENDAR_SYNC_ENABLED &&
       event.googleCalendarEventId &&
       event.date >= window.startDate &&
       event.date <= window.endDate &&
@@ -116,7 +121,7 @@ export const runCalendarAudit = async (accessToken, { adminEmail } = {}) => {
   const linkedIds = new Set(firestoreEvents.map((event) => event.googleCalendarEventId).filter(Boolean))
 
   const findings = [
-    ...auditEventsCalendar({
+    ...(EVENTS_CALENDAR_SYNC_ENABLED ? auditEventsCalendar({
       firestoreEvents,
       lookupGoogleEvent: (calendarId, eventId) => googleByKey.get(`${calendarId}|${eventId}`) || null,
       eventsCalendarEntries: listings.get(EVENTS_CALENDAR_ID) || [],
@@ -126,7 +131,7 @@ export const runCalendarAudit = async (accessToken, { adminEmail } = {}) => {
       trustedEditors,
       timeZone: CALENDAR_TIME_ZONE,
       window,
-    }),
+    }) : []),
     ...auditScheduleCalendar({
       scheduleEntries: listings.get(SCHEDULE_CALENDAR_ID) || [],
       skipEventIds: linkedIds,
