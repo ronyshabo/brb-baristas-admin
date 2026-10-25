@@ -35,6 +35,9 @@
   --sched-shared-bg: #ccffcc;
   --sched-shared-line: #00aa00;
   --sched-shared-ink: #006600;
+  --sched-middle-bg: #ead9ff;
+  --sched-middle-line: #7a4fc4;
+  --sched-middle-ink: #4b2384;
   --sched-open-ink: #cc0000;
 
   color: var(--sched-ink);
@@ -188,6 +191,7 @@
 .sched-bubble-opening { background: var(--sched-opening-bg); border-color: var(--sched-opening-line); color: var(--sched-opening-ink); }
 .sched-bubble-closing { background: var(--sched-closing-bg); border-color: var(--sched-closing-line); color: var(--sched-closing-ink); }
 .sched-bubble-shared  { background: var(--sched-shared-bg);  border-color: var(--sched-shared-line);  color: var(--sched-shared-ink); }
+.sched-bubble-middle  { background: var(--sched-middle-bg);  border-color: var(--sched-middle-line);  color: var(--sched-middle-ink); }
 
 .sched-legend-item.is-open {
   border-style: dashed;
@@ -307,6 +311,33 @@
 .sched-day-bubbles .sched-bubble-opening { grid-column: 1; grid-row: 1; }
 .sched-day-bubbles .sched-bubble-closing { grid-column: 1; grid-row: 2; }
 .sched-day-bubbles .sched-bubble-shared  { grid-column: 2; grid-row: 1 / span 2; align-self: center; }
+
+/* A middle shift goes between Opening and Closing; Shared spans all three. */
+.sched-day.has-middle .sched-day-bubbles { grid-template-rows: 1fr auto 1fr; }
+.sched-day-bubbles .sched-bubble-middle  { grid-column: 1; grid-row: 2; }
+.sched-day.has-middle .sched-day-bubbles .sched-bubble-closing { grid-row: 3; }
+.sched-day.has-middle .sched-day-bubbles .sched-bubble-shared  { grid-row: 1 / span 3; }
+
+.sched-add-middle {
+  margin-left: auto;
+  padding: 0 4px;
+  border: 1px dashed var(--sched-middle-line);
+  background: transparent;
+  color: var(--sched-middle-ink);
+  font: inherit;
+  font-size: 0.7rem;
+  cursor: pointer;
+  opacity: 0;
+}
+
+.sched-day:hover .sched-add-middle,
+.sched-add-middle:focus-visible {
+  opacity: 1;
+}
+
+@media (hover: none) {
+  .sched-add-middle { opacity: 0.8; }
+}
 
 .sched-bubble {
   display: flex;
@@ -440,6 +471,45 @@
   border-color: var(--sched-border);
   background: var(--sched-border);
   color: #fff;
+}
+
+/* A colour the barista picked. Your own shifts still get the bubble outline. */
+.sched-name.has-color {
+  border-color: var(--who);
+  background: var(--who);
+  color: #fff;
+}
+
+.sched-name.has-color:hover {
+  filter: brightness(1.15);
+}
+
+.sched-color-choices {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.sched-color-swatch {
+  min-width: 72px;
+  padding: 6px 8px;
+  border: 2px solid transparent;
+  background: var(--who, var(--sched-surface));
+  color: #fff;
+  font: inherit;
+  font-size: 0.85rem;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.sched-color-swatch.is-none {
+  border-color: var(--sched-border);
+  color: var(--sched-ink);
+}
+
+.sched-color-swatch[aria-pressed='true'] {
+  outline: 3px solid var(--sched-border);
+  outline-offset: 2px;
 }
 
 .sched-bubble-head:focus-visible,
@@ -605,6 +675,7 @@
 .sched-header-opening { border-bottom-color: var(--sched-opening-line); }
 .sched-header-closing { border-bottom-color: var(--sched-closing-line); }
 .sched-header-shared  { border-bottom-color: var(--sched-shared-line); }
+.sched-header-middle  { border-bottom-color: var(--sched-middle-line); }
 
 .sched-modal-header .sched-custom-tag {
   background: #fff;

@@ -57,21 +57,31 @@ function CalendarAuditPanel({ audit, accessToken }) {
     if (failures.length) alert(`${failures.length} could not be moved:\n${failures.join('\n')}`)
   }
 
+  // Collapsed by default so it doesn't push the events list down; the summary
+  // line still shows how many discrepancies are open.
+  const summary = (
+    <summary className="audit-summary">
+      <span>Calendar check</span>
+      {openFindings.length > 0 && <span className="audit-count">{openFindings.length}</span>}
+    </summary>
+  )
+
   if (!accessToken) {
     return (
-      <div className="audit-panel">
-        <h3>Calendar check</h3>
+      <details className="audit-panel">
+        {summary}
         <p className="audit-muted">Connect Google Calendar to check both calendars for changes made outside the app.</p>
-      </div>
+      </details>
     )
   }
 
   const visibleChanges = showAllChanges ? result?.recentChanges || [] : outsideChanges
 
   return (
-    <div className="audit-panel">
+    <details className="audit-panel">
+      {summary}
       <div className="audit-header">
-        <h3>Calendar check</h3>
+        <span className="audit-muted">Compares Google Calendar with the app and lists changes made outside it.</span>
         <button onClick={run} disabled={running}>{running ? 'Checking...' : 'Run check'}</button>
       </div>
 
@@ -155,7 +165,7 @@ function CalendarAuditPanel({ audit, accessToken }) {
           </div>
         </>
       )}
-    </div>
+    </details>
   )
 }
 

@@ -47,6 +47,7 @@ export const watchWeekly = (callback, onError) => watch('scheduleWeekly', callba
 export const watchAlerts = (callback, onError) => watch('scheduleAlerts', callback, onError)
 export const watchSettings = (callback, onError) => watch('scheduleSettings', callback, onError)
 export const watchShiftTimes = (callback, onError) => watch('scheduleShiftTimes', callback, onError)
+export const watchScheduleUsers = (callback, onError) => watch('scheduleUsers', callback, onError)
 
 // ---- shifts ----
 
@@ -153,4 +154,8 @@ export const saveWeekly = (barista, cant) =>
   report(set('scheduleWeekly', barista.id, { baristaId: barista.id, baristaName: barista.name, cant, updatedAt: now() }))
 
 // Admin only: fills in an address so the broadcast email can reach them.
+// A barista's calendar colour (a BARISTA_COLORS id, or null for none), on
+// their own login's scheduleUsers doc.
+export const setMyColor = (uid, color) => report(update('scheduleUsers', uid, { color: color || null }))
+
 export const setBaristaEmail = (barista, email) => report(update('baristas', barista.id, { email: email.trim() || null }))

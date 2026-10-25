@@ -7,7 +7,7 @@ import DefaultHoursPanel from './DefaultHoursPanel'
 import { useScheduleData } from './useScheduleData'
 import { assignShift, moveShift, replaceShift, resetShiftTimes, setBaristaEmail, setShiftTimes, unassignShift } from './store'
 import { buildBroadcast, gmailComposeUrl } from './broadcast.js'
-import { REASON_LABELS, SHIFTS, conflicts, coverageGaps, freeFor, dateKey, dayTypeFor, formatDay, openShifts, pickerLists } from './shifts.js'
+import { REASON_LABELS, SHIFTS, conflicts, coverageGaps, freeFor, dateKey, dayTypeFor, formatDay, openShifts, pickerLists, shiftsOnDay } from './shifts.js'
 import './schedule.css'
 
 // The Gmail account the broadcast opens in, so it goes out from the shop.
@@ -199,6 +199,8 @@ export default function AdminScheduleTab() {
         assignmentsByDate={data.assignmentsByDate}
         timesFor={data.timesFor}
         showGaps
+        addMiddle
+        colors={data.colors}
         freeCount={(date, shift) => freeFor({ baristas: data.baristas, date, shift, availabilityOf: data.availabilityOf }).length}
         onPick={(date, shift, focusId) => setPicking({ date, shift, focusId })}
       />
@@ -266,7 +268,12 @@ export default function AdminScheduleTab() {
           onSaveHours={(range) => setShiftTimes(picking.date, picking.shift, range)}
           onResetHours={() => resetShiftTimes(picking.date, picking.shift)}
           gapsWith={(range) =>
-            coverageGaps(picking.date, (date, shift) => (shift === picking.shift ? range : data.timesFor(date, shift)))
+            coverageGaps(
+              picking.date,
+              (date, shift) => (shift === picking.shift ? range : data.timesFor(date, shift)),
+              // The shift being edited counts even before anyone is on it (a new middle shift).
+              [...new Set([...shiftsOnDay(picking.date, data.assignmentsByDate[picking.date]), picking.shift])]
+            )
           }
           onClose={() => setPicking(null)}
         />

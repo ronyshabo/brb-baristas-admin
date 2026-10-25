@@ -5,15 +5,24 @@
 // also have a shared shift in the middle of the day. Change SHARED_DAYS to
 // move shared shifts to other days; times are display labels only.
 //
+// Any day can also have a middle shift between opening and closing (someone
+// covering 12-2 when the opener leaves early). It is optional: it only exists
+// on a day once the admin puts someone on it, so it is never "open", never
+// auto-filled, and not part of anyone's availability.
+//
 // Each shift has exactly one barista.
 
 export const SHIFTS = {
   opening: { id: 'opening', label: 'Opening', short: 'Opening' },
   closing: { id: 'closing', label: 'Closing', short: 'Closing' },
   shared: { id: 'shared', label: 'Shared', short: 'Shared' },
+  middle: { id: 'middle', label: 'Middle', short: 'Middle' },
 }
 
+// The regular shifts - the ones availability is about.
 export const SHIFT_ORDER = ['opening', 'shared', 'closing']
+// Every shift, in the order a day lists them.
+export const DAY_ORDER = ['opening', 'middle', 'shared', 'closing']
 
 // Date.getDay(): 0 = Sunday ... 5 = Friday, 6 = Saturday.
 export const SHARED_DAYS = [5, 6, 0]
@@ -35,11 +44,13 @@ export const DEFAULT_HOURS = {
     opening: { start: '08:00', end: '14:00' },
     closing: { start: '14:00', end: '21:00' },
     shared: { start: '12:00', end: '18:00' },
+    middle: { start: '12:00', end: '14:00' },
   },
   weekend: {
     opening: { start: '09:00', end: '14:00' },
     closing: { start: '14:00', end: '21:00' },
     shared: { start: '12:00', end: '18:00' },
+    middle: { start: '12:00', end: '14:00' },
   },
 }
 
@@ -87,10 +98,11 @@ export const formatRange = (range) => `${formatTime(range.start)} – ${formatTi
 /**
  * Stretches of a day nobody's shift covers, between the first shift's start
  * and the last one's end - e.g. opening cut to 1pm while closing starts at 2pm.
- * Returns [{ start, end }].
+ * `shifts` defaults to the day's regular shifts; pass shiftsOnDay(...) to count
+ * a middle shift. Returns [{ start, end }].
  */
-export const coverageGaps = (key, timesForShift) => {
-  const ranges = shiftsForDate(key)
+export const coverageGaps = (key, timesForShift, shifts = shiftsForDate(key)) => {
+  const ranges = shifts
     .map((shift) => timesForShift(key, shift))
     .sort((left, right) => left.start.localeCompare(right.start))
   const gaps = []
@@ -114,10 +126,16 @@ export const parseDateKey = (key) => {
 
 export const monthKey = (date) => dateKey(date).slice(0, 7)
 
+// The regular shifts on a date. A middle shift is never "due", so it isn't here.
 export const shiftsForDate = (key) => {
   const weekday = parseDateKey(key).getDay()
   return SHARED_DAYS.includes(weekday) ? ['opening', 'closing', 'shared'] : ['opening', 'closing']
 }
+
+// What a day actually shows, in DAY_ORDER: its regular shifts plus a middle
+// shift when someone is on it. `day` is assignmentsByDate[key].
+export const shiftsOnDay = (key, day) =>
+  DAY_ORDER.filter((shift) => shiftsForDate(key).includes(shift) || (shift === 'middle' && day?.middle?.length))
 
 // Weeks for a month view, Monday first so Fri-Sat-Sun sit together on the
 // right. Days outside the month are null.
@@ -286,3 +304,87 @@ export const conflicts = ({ assignments, availabilityOf }) =>
     .map((entry) => ({ ...entry, availability: availabilityOf(entry.baristaId, entry.date, entry.shift) }))
     .filter((entry) => !entry.availability.ok)
     .map((entry) => ({ ...entry, reason: entry.availability.reason }))
+
+// ---- fill my schedule ----
+
+// The Monday that starts the week of `key` (weeks run Mon-Sun, like the calendar).
+export const weekStartOf = (key) => {
+  const date = parseDateKey(key)
+  date.setDate(date.getDate() - ((date.getDay() + 6) % 7))
+  return dateKey(date)
+}
+
+/**
+ * A barista signing themselves up for empty shifts in [startKey, endKey].
+ * Takes only shifts nobody has and that they said they can do, never two on
+ * one day, and at most `maxPerWeek` shifts in any Mon-Sun week - counting the
+ * shifts they already have that week. Earliest shifts first.
+ *
+ * Returns { picks: [{ date, shift }], heldBack } - heldBack is how many more
+ * days they could have worked without the weekly limit.
+ */
+export const fillMine = ({ baristaId, startKey, endKey, assignmentsByDate, availabilityOf, maxPerWeek }) => {
+  const perWeek = {}
+  const busyDays = new Set()
+  for (const [date, day] of Object.entries(assignmentsByDate)) {
+    for (const list of Object.values(day)) {
+      for (const entry of list) {
+        if (entry.baristaId !== baristaId) continue
+        busyDays.add(date)
+        perWeek[weekStartOf(date)] = (perWeek[weekStartOf(date)] || 0) + 1
+      }
+    }
+  }
+
+  const picks = []
+  const heldBackDays = new Set()
+  for (const { date, shift } of openShifts({ startKey, endKey, assignmentsByDate })) {
+    if (busyDays.has(date) || !availabilityOf(baristaId, date, shift).ok) continue
+    const week = weekStartOf(date)
+    if ((perWeek[week] || 0) >= maxPerWeek) {
+      heldBackDays.add(date)
+      continue
+    }
+    picks.push({ date, shift })
+    perWeek[week] = (perWeek[week] || 0) + 1
+    busyDays.add(date)
+  }
+  return { picks, heldBack: heldBackDays.size }
+}
+
+// ---- barista colours ----
+//
+// Each barista can pick a colour for their name on the calendar. It is saved
+// on their own scheduleUsers/{uid} doc (which they may edit and every signed-in
+// user may read) as `color: <id>`. All of these keep white text readable.
+
+export const BARISTA_COLORS = [
+  { id: 'red', label: 'Red', hex: '#c0392b' },
+  { id: 'orange', label: 'Orange', hex: '#b9520b' },
+  { id: 'gold', label: 'Gold', hex: '#8a6d00' },
+  { id: 'green', label: 'Green', hex: '#2e7d32' },
+  { id: 'teal', label: 'Teal', hex: '#00796b' },
+  { id: 'sky', label: 'Sky', hex: '#0277bd' },
+  { id: 'blue', label: 'Blue', hex: '#1f4fbf' },
+  { id: 'indigo', label: 'Indigo', hex: '#4a3aa8' },
+  { id: 'purple', label: 'Purple', hex: '#7b1fa2' },
+  { id: 'pink', label: 'Pink', hex: '#c2185b' },
+  { id: 'brown', label: 'Brown', hex: '#6d4c41' },
+  { id: 'slate', label: 'Slate', hex: '#455a64' },
+]
+
+/**
+ * { baristaId: hex } from the scheduleUsers docs. Only the login currently
+ * linked to a barista (baristas/{id}.uid) counts, and unknown colour ids are
+ * ignored.
+ */
+export const baristaColors = (scheduleUsers, baristas) => {
+  const hexById = new Map(BARISTA_COLORS.map((color) => [color.id, color.hex]))
+  const colorByUid = new Map(scheduleUsers.map((entry) => [entry.uid || entry.id, entry.color]))
+  const result = {}
+  for (const barista of baristas) {
+    const hex = barista.uid && hexById.get(colorByUid.get(barista.uid))
+    if (hex) result[barista.id] = hex
+  }
+  return result
+}

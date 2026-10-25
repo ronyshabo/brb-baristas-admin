@@ -4,6 +4,12 @@ on:
   push:
     branches:
       - main
+  workflow_dispatch:
+
+# A second push waits for the running deploy instead of racing it.
+concurrency:
+  group: deploy-brb-baristas
+  cancel-in-progress: false
 
 jobs:
   deploy:
@@ -76,58 +82,64 @@ jobs:
 
           ssh-keyscan -p "$EC2_SSH_PORT" -H "$EC2_HOST" >> ~/.ssh/known_hosts
 
-          # SSH into EC2 and run deploy script via bash -s to bypass .bashrc interactive guards
-          ssh -T -p "$EC2_SSH_PORT" -i ~/.ssh/id_rsa "$EC2_USER@$EC2_HOST" bash -s << EOF
+          # The server script below is quoted (nothing in it expands here). Its
+          # inputs - the commit to deploy and the base64 secrets - go first as
+          # plain assignments on stdin, so they never show up in a process list.
+          SECRET_NAMES="VITE_FIREBASE_API_KEY VITE_FIREBASE_AUTH_DOMAIN VITE_FIREBASE_PROJECT_ID VITE_FIREBASE_STORAGE_BUCKET VITE_FIREBASE_MESSAGING_SENDER_ID VITE_FIREBASE_APP_ID VITE_GOOGLE_CALENDAR_ID VITE_GOOGLE_CALENDAR_API_KEY VITE_GOOGLE_EVENTS_CALENDAR_ID VITE_GOOGLE_SCHEDULE_CALENDAR_ID VITE_GOOGLE_CALENDAR_TRUSTED_EDITORS"
+          {
+            printf 'DEPLOY_SHA=%q\n' "$GITHUB_SHA"
+            printf 'SECRET_NAMES=%q\n' "$SECRET_NAMES"
+            for name in $SECRET_NAMES; do
+              b64_name="${name}_B64"
+              printf '%s=%q\n' "$b64_name" "${!b64_name}"
+            done
+            cat << 'EOF'
           set -euo pipefail
           cd ~/brb-baristas-admin
+          IMAGE="brb-admin:${DEPLOY_SHA:0:12}"
 
-          git fetch origin main
-          git checkout main
-          git reset --hard origin/main
+          # One build at a time on this server. Every BRB app that builds here
+          # takes the same lock, so two deploys can't fight over its memory.
+          exec 9>/tmp/brb-deploy.lock
+          echo "Waiting for any other deploy on this server to finish..."
+          flock -w 1800 9 || { echo "Gave up after 30 minutes waiting for another deploy."; exit 1; }
 
-          printf '%s' "$VITE_FIREBASE_API_KEY_B64" | base64 -d > /tmp/VITE_FIREBASE_API_KEY
-          printf '%s' "$VITE_FIREBASE_AUTH_DOMAIN_B64" | base64 -d > /tmp/VITE_FIREBASE_AUTH_DOMAIN
-          printf '%s' "$VITE_FIREBASE_PROJECT_ID_B64" | base64 -d > /tmp/VITE_FIREBASE_PROJECT_ID
-          printf '%s' "$VITE_FIREBASE_STORAGE_BUCKET_B64" | base64 -d > /tmp/VITE_FIREBASE_STORAGE_BUCKET
-          printf '%s' "$VITE_FIREBASE_MESSAGING_SENDER_ID_B64" | base64 -d > /tmp/VITE_FIREBASE_MESSAGING_SENDER_ID
-          printf '%s' "$VITE_FIREBASE_APP_ID_B64" | base64 -d > /tmp/VITE_FIREBASE_APP_ID
-          printf '%s' "$VITE_GOOGLE_CALENDAR_ID_B64" | base64 -d > /tmp/VITE_GOOGLE_CALENDAR_ID
-          printf '%s' "$VITE_GOOGLE_CALENDAR_API_KEY_B64" | base64 -d > /tmp/VITE_GOOGLE_CALENDAR_API_KEY
-          printf '%s' "$VITE_GOOGLE_EVENTS_CALENDAR_ID_B64" | base64 -d > /tmp/VITE_GOOGLE_EVENTS_CALENDAR_ID
-          printf '%s' "$VITE_GOOGLE_SCHEDULE_CALENDAR_ID_B64" | base64 -d > /tmp/VITE_GOOGLE_SCHEDULE_CALENDAR_ID
-          printf '%s' "$VITE_GOOGLE_CALENDAR_TRUSTED_EDITORS_B64" | base64 -d > /tmp/VITE_GOOGLE_CALENDAR_TRUSTED_EDITORS
+          # Each commit is built once; a rerun of the same commit reuses its image.
+          if docker image inspect "$IMAGE" > /dev/null 2>&1; then
+            echo "$IMAGE is already built - skipping the build."
+          else
+            # Exactly the commit that triggered this run, not whatever main is now.
+            git fetch --quiet origin main
+            git checkout --quiet --force --detach "$DEPLOY_SHA"
 
-          export DOCKER_BUILDKIT=1
-          docker build --no-cache \
-            --secret id=VITE_FIREBASE_API_KEY,src=/tmp/VITE_FIREBASE_API_KEY \
-            --secret id=VITE_FIREBASE_AUTH_DOMAIN,src=/tmp/VITE_FIREBASE_AUTH_DOMAIN \
-            --secret id=VITE_FIREBASE_PROJECT_ID,src=/tmp/VITE_FIREBASE_PROJECT_ID \
-            --secret id=VITE_FIREBASE_STORAGE_BUCKET,src=/tmp/VITE_FIREBASE_STORAGE_BUCKET \
-            --secret id=VITE_FIREBASE_MESSAGING_SENDER_ID,src=/tmp/VITE_FIREBASE_MESSAGING_SENDER_ID \
-            --secret id=VITE_FIREBASE_APP_ID,src=/tmp/VITE_FIREBASE_APP_ID \
-            --secret id=VITE_GOOGLE_CALENDAR_ID,src=/tmp/VITE_GOOGLE_CALENDAR_ID \
-            --secret id=VITE_GOOGLE_CALENDAR_API_KEY,src=/tmp/VITE_GOOGLE_CALENDAR_API_KEY \
-            --secret id=VITE_GOOGLE_EVENTS_CALENDAR_ID,src=/tmp/VITE_GOOGLE_EVENTS_CALENDAR_ID \
-            --secret id=VITE_GOOGLE_SCHEDULE_CALENDAR_ID,src=/tmp/VITE_GOOGLE_SCHEDULE_CALENDAR_ID \
-            --secret id=VITE_GOOGLE_CALENDAR_TRUSTED_EDITORS,src=/tmp/VITE_GOOGLE_CALENDAR_TRUSTED_EDITORS \
-            -t brb-admin:candidate .
+            # This deploy's own secrets folder, removed however the script ends.
+            SECRETS_DIR="$(mktemp -d)"
+            trap 'rm -rf "$SECRETS_DIR"' EXIT
+            secret_args=()
+            for name in $SECRET_NAMES; do
+              b64_name="${name}_B64"
+              printf '%s' "${!b64_name}" | base64 -d > "$SECRETS_DIR/$name"
+              secret_args+=(--secret "id=$name,src=$SECRETS_DIR/$name")
+            done
 
-          rm -f /tmp/VITE_FIREBASE_API_KEY \
-            /tmp/VITE_FIREBASE_AUTH_DOMAIN \
-            /tmp/VITE_FIREBASE_PROJECT_ID \
-            /tmp/VITE_FIREBASE_STORAGE_BUCKET \
-            /tmp/VITE_FIREBASE_MESSAGING_SENDER_ID \
-            /tmp/VITE_FIREBASE_APP_ID \
-            /tmp/VITE_GOOGLE_CALENDAR_ID \
-            /tmp/VITE_GOOGLE_CALENDAR_API_KEY \
-            /tmp/VITE_GOOGLE_EVENTS_CALENDAR_ID \
-            /tmp/VITE_GOOGLE_SCHEDULE_CALENDAR_ID \
-            /tmp/VITE_GOOGLE_CALENDAR_TRUSTED_EDITORS
+            # No --no-cache: the npm install layer is reused until package*.json change.
+            DOCKER_BUILDKIT=1 docker build "${secret_args[@]}" -t "$IMAGE" .
+          fi
 
-          docker stop brb-admin && docker rm brb-admin || true
-          docker tag brb-admin:candidate brb-admin:latest
-          docker run -d -p 3001:80 --name brb-admin brb-admin:latest
+          if [ "$(docker inspect -f '{{.Image}}' brb-admin 2>/dev/null)" = "$(docker image inspect -f '{{.Id}}' "$IMAGE")" ] \
+            && [ "$(docker inspect -f '{{.State.Running}}' brb-admin 2>/dev/null)" = "true" ]; then
+            echo "brb-admin is already running $IMAGE - nothing to swap."
+          else
+            docker stop brb-admin && docker rm brb-admin || true
+            docker tag "$IMAGE" brb-admin:latest
+            docker run -d -p 3001:80 --name brb-admin brb-admin:latest
+          fi
           docker ps --filter name=brb-admin --format 'table {{.Names}}\t{{.Status}}\t{{.Ports}}'
           docker inspect -f '{{.State.Running}}' brb-admin | grep true
+
+          # Keep the three newest commit images for quick rollbacks; drop older ones.
+          docker images brb-admin --format '{{.Tag}}' | grep -Ev '^(latest|candidate)$' | tail -n +4 \
+            | xargs -r -I{} docker rmi "brb-admin:{}" || true
           echo "Deployment complete and container is running."
           EOF
+          } | ssh -T -p "$EC2_SSH_PORT" -i ~/.ssh/id_rsa "$EC2_USER@$EC2_HOST" bash -s

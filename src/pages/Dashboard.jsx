@@ -66,11 +66,7 @@ function Dashboard({ user, googleAccessToken, setGoogleAccessToken }) {
         )}
         {activeTab === 'schedule' && <AdminScheduleTab />}
         {activeTab === 'staff' && (
-          <StaffTab
-            user={user}
-            accessToken={googleAccessToken}
-            setAccessToken={setGoogleAccessToken}
-          />
+          <StaffTab user={user} />
         )}
         {activeTab === 'websiteContent' && <WebsiteContentTab user={user} />}
         {activeTab === 'inventory' && <InventoryTab />}

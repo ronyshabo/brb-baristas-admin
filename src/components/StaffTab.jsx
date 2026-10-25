@@ -1,41 +1,40 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useMemo } from 'react'
 import { collection, addDoc, getDocs, query, orderBy, doc, updateDoc, deleteDoc, setDoc } from 'firebase/firestore'
 import { db } from '../firebase/config'
-import { signInWithGoogleCalendar, clearGoogleToken } from '../firebase/googleAuth'
-import { SCHEDULE_CALENDAR_ID } from '../services/calendars'
+import { fetchMasterWeek, workedFromDays } from '../lib/masterSchedule'
 import BaristaStatementTab from './BaristaStatementTab'
 import '../styles/StaffTab.css'
 
 // A person paid $600+ in a calendar year needs a 1099-NEC (non-employee comp).
 const TAX_1099_THRESHOLD = 600
 
-// Shift windows as scheduled on the calendar, in hours.
-const MORNING_HOURS = 6         // 8am - 2pm
-const EVENING_HOURS = 7         // 2pm - 9pm
-const INTER_SHIFT_HOURS = 6     // 12pm - 6pm
-const INTER_MORNING_OVERLAP = 2 // the 12pm - 2pm part of an inter-shift
-const INTER_EVENING_OVERLAP = 4 // the 2pm - 6pm part of an inter-shift
+// The daily-totals method splits a day's tips into a pool before this hour
+// and a pool after it (opening hands over to closing at 2pm).
+const SPLIT_HOUR = 14
 
-function StaffTab({ user, accessToken, setAccessToken }) {
+function StaffTab({ user }) {
   const [view, setView] = useState('calculator') // calculator, baristas, reports, statements
   const [baristas, setBaristas] = useState([])
   const [selectedWeek, setSelectedWeek] = useState('')
   const [tipInputMethod, setTipInputMethod] = useState('byHour') // byHour, bulk, manual
   const [bulkTipData, setBulkTipData] = useState('')
   const [dailyTips, setDailyTips] = useState({})
-  const [weekSchedule, setWeekSchedule] = useState(null)
   const [loading, setLoading] = useState(false)
   const [calculation, setCalculation] = useState(null)
   const [reports, setReports] = useState([])
   const [newBarista, setNewBarista] = useState({ name: '', basePay: '' })
   const [editingBarista, setEditingBarista] = useState(null)
-  const [syncingBaristas, setSyncingBaristas] = useState(false)
-  const [hasAutoSyncedMonth, setHasAutoSyncedMonth] = useState(false)
   const [squareData, setSquareData] = useState('')
-  const [weekShifts, setWeekShifts] = useState([])
+  // The loaded week as the master schedule has it (loadedDays), the admin's copy
+  // of it for this tip calculation (scheduleDays - people can be added to a shift
+  // or their hours changed when a shift was split), and what looks wrong.
+  // Tips can't be calculated until the admin confirms it matches who worked.
+  const [loadedDays, setLoadedDays] = useState([])
+  const [scheduleDays, setScheduleDays] = useState([])
+  const [scheduleIssues, setScheduleIssues] = useState([])
+  const [scheduleConfirmed, setScheduleConfirmed] = useState(false)
   const [reportText, setReportText] = useState('')
   const [copiedReport, setCopiedReport] = useState(false)
-  const [connectingGoogle, setConnectingGoogle] = useState(false)
   const [taxYear, setTaxYear] = useState(String(new Date().getFullYear()))
   const [taxBasis, setTaxBasis] = useState('weekStart')
   const [taxSummary, setTaxSummary] = useState(null)
@@ -43,9 +42,6 @@ function StaffTab({ user, accessToken, setAccessToken }) {
   // Collapsed by default: this panel is ~200 lines of tables, and the saved
   // reports underneath it were a long scroll away.
   const [taxPanelOpen, setTaxPanelOpen] = useState(false)
-
-  // Shifts live on the schedule calendar; band events have their own now.
-  const calendarId = SCHEDULE_CALENDAR_ID
 
   const formatDateKey = (date) => {
     const year = date.getFullYear()
@@ -57,6 +53,13 @@ function StaffTab({ user, accessToken, setAccessToken }) {
   const parseDateInput = (value) => {
     const [year, month, day] = value.split('-').map(Number)
     return new Date(year, month - 1, day)
+  }
+
+  // '14:30' -> '2:30pm', '08:00' -> '8am'
+  const formatClock = (time) => {
+    const [hour, minute] = time.split(':').map(Number)
+    const suffix = hour >= 12 ? 'pm' : 'am'
+    return `${hour % 12 || 12}${minute ? `:${String(minute).padStart(2, '0')}` : ''}${suffix}`
   }
 
   const getSundayOfWeek = (date) => {
@@ -71,13 +74,6 @@ function StaffTab({ user, accessToken, setAccessToken }) {
     fetchBaristas()
     fetchReports()
   }, [])
-
-  useEffect(() => {
-    if (view === 'baristas' && accessToken && baristas.length === 0 && !hasAutoSyncedMonth) {
-      setHasAutoSyncedMonth(true)
-      syncBaristasFromCurrentMonth(false)
-    }
-  }, [view, accessToken, baristas.length, hasAutoSyncedMonth])
 
   const fetchBaristas = async () => {
     try {
@@ -153,229 +149,53 @@ function StaffTab({ user, accessToken, setAccessToken }) {
     }
   }
 
-  const syncBaristasFromCurrentMonth = async (showAlert = true) => {
-    if (!accessToken) {
-      if (showAlert) alert('Please connect Google first to sync baristas from calendar')
-      return
-    }
+  // Everyone on each shift with their own hours, from the (adjusted) preview.
+  const { weekSchedule, weekShifts, problems: scheduleProblems } = useMemo(
+    () => (scheduleDays.length ? workedFromDays(scheduleDays) : { weekSchedule: null, weekShifts: [], problems: [] }),
+    [scheduleDays]
+  )
+  // Shifts the admin changed from what the master schedule says, saved with the report.
+  const scheduleAdjustments = scheduleDays.flatMap((day, dayIndex) =>
+    day.shifts
+      .filter((shift, shiftIndex) => JSON.stringify(shift.people) !== JSON.stringify(loadedDays[dayIndex]?.shifts[shiftIndex]?.people))
+      .map(shift => ({ date: day.date, shift: shift.shift, people: shift.people }))
+  )
+  const openIssues = scheduleIssues.filter(issue =>
+    !issue.slot || !scheduleDays.some(day => day.shifts.some(shift => `${day.date}_${shift.shift}` === issue.slot && shift.people.length))
+  )
 
-    setSyncingBaristas(true)
-    try {
-      const now = new Date()
-      const monthStart = new Date(now.getFullYear(), now.getMonth(), 1)
-      const nextMonthStart = new Date(now.getFullYear(), now.getMonth() + 1, 1)
-
-      const url = `https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(
-        calendarId
-      )}/events?timeMin=${monthStart.toISOString()}&timeMax=${nextMonthStart.toISOString()}&singleEvents=true&orderBy=startTime`
-
-      const response = await fetch(url, {
-        headers: { Authorization: `Bearer ${accessToken}` }
-      })
-
-      const data = await response.json()
-      if (!response.ok) throw new Error('Failed to fetch calendar events')
-
-      const namesFromCalendar = new Set()
-      ;(data.items || []).forEach((event) => {
-        if (!event?.summary) return
-        const bracketMatch = event.summary.match(/^\[([^,]+),\s*([^\]]+)\]/)
-        if (!bracketMatch) return
-        const baristaName = bracketMatch[1].trim()
-        if (baristaName) namesFromCalendar.add(baristaName)
-      })
-
-      const existingNames = new Set(baristas.map((b) => b.name.trim().toLowerCase()))
-      const namesToCreate = [...namesFromCalendar].filter(
-        (name) => !existingNames.has(name.trim().toLowerCase())
-      )
-
-      await Promise.all(
-        namesToCreate.map((name) =>
-          addDoc(collection(db, 'baristas'), {
-            name,
-            basePay: 0,
-            active: true,
-            autoImported: true,
-            createdAt: new Date(),
-            createdBy: user?.uid || 'system'
-          })
-        )
-      )
-
-      await fetchBaristas()
-
-      if (showAlert) {
-        if (namesToCreate.length > 0) {
-          alert(`Imported ${namesToCreate.length} baristas from ${now.toLocaleString('en-US', { month: 'long' })} schedule.`)
-        } else {
-          alert('All current month baristas are already listed.')
-        }
-      }
-    } catch (err) {
-      console.error('Error syncing baristas:', err)
-      if (showAlert) alert('Failed to sync baristas from calendar')
-    } finally {
-      setSyncingBaristas(false)
-    }
-  }
-
-  // Popups are blocked unless this runs from a click, so the tab shows a
-  // "Connect Google Calendar" button rather than prompting on its own.
-  const connectGoogleCalendar = async () => {
-    setConnectingGoogle(true)
-    try {
-      const { accessToken: freshToken } = await signInWithGoogleCalendar()
-      if (!freshToken) throw new Error('Google did not return calendar access')
-      setAccessToken(freshToken)
-    } catch (err) {
-      console.error('Google calendar connect failed:', err)
-      alert('Could not connect Google Calendar: ' + err.message)
-    } finally {
-      setConnectingGoogle(false)
-    }
-  }
-
-  // A token can expire mid-session; drop it so the connect prompt comes back.
-  const handleExpiredToken = () => {
-    clearGoogleToken()
-    setAccessToken(null)
+  // Edits one shift's people in the preview. Any change needs a fresh confirm.
+  const changeShiftPeople = (date, shiftId, change) => {
+    setScheduleDays(days => days.map(day => day.date !== date ? day : {
+      ...day,
+      shifts: day.shifts.map(shift => shift.shift !== shiftId ? shift : { ...shift, people: change(shift.people, shift) }),
+    }))
+    setScheduleConfirmed(false)
+    setCalculation(null)
   }
 
   const fetchWeekSchedule = async () => {
-    if (!selectedWeek || !accessToken) {
-      alert('Please select a week and ensure you are logged in with Google')
+    if (!selectedWeek) {
+      alert('Please select a week first')
       return
     }
 
     setLoading(true)
     try {
       const weekStart = getSundayOfWeek(parseDateInput(selectedWeek))
-      const weekEnd = new Date(weekStart)
-      weekEnd.setDate(weekEnd.getDate() + 7)
-
-      const url = `https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(
-        calendarId
-      )}/events?timeMin=${weekStart.toISOString()}&timeMax=${weekEnd.toISOString()}&singleEvents=true&orderBy=startTime`
-
-      const response = await fetch(url, {
-        headers: { Authorization: `Bearer ${accessToken}` }
-      })
-
-      const data = await response.json()
-      if (response.status === 401 || response.status === 403) {
-        handleExpiredToken()
-        throw new Error('Google Calendar access expired. Please reconnect above and try again.')
-      }
-      if (!response.ok) throw new Error('Failed to fetch calendar events')
-
-      // Process schedule by day
-      const schedule = processSchedule(data.items, weekStart)
-      setWeekSchedule(schedule)
-      const shifts = extractShifts(data.items)
-      setWeekShifts(shifts)
+      const { days, issues } = await fetchMasterWeek(db, weekStart, baristas)
+      setLoadedDays(days)
+      setScheduleDays(days)
+      setScheduleIssues(issues)
+      setScheduleConfirmed(false)
+      setCalculation(null)
       setSelectedWeek(formatDateKey(weekStart))
-      alert('Schedule loaded successfully!')
     } catch (err) {
       console.error('Error fetching schedule:', err)
       alert('Failed to load schedule: ' + err.message)
     } finally {
       setLoading(false)
     }
-  }
-
-  const processSchedule = (events, weekStart) => {
-    const schedule = {}
-    
-    for (let i = 0; i < 7; i++) {
-      const currentDay = new Date(weekStart)
-      currentDay.setDate(currentDay.getDate() + i)
-      const dateKey = formatDateKey(currentDay)
-      
-      schedule[dateKey] = {
-        morning: [], // 8am-2pm
-        evening: [], // 2pm-9pm
-        interShift: [] // 12pm-6pm
-      }
-    }
-
-    events.forEach(event => {
-      if (!event.start?.dateTime || !event.summary) return
-      
-      // Only process events with format [Name, Shift Type]
-      const bracketMatch = event.summary.match(/^\[([^,]+),\s*([^\]]+)\]/)
-      if (!bracketMatch) return // Skip non-staff events
-      
-      const baristaName = bracketMatch[1].trim()
-      const shiftType = bracketMatch[2].trim().toLowerCase()
-      const startTime = new Date(event.start.dateTime)
-      const endTime = new Date(event.end.dateTime)
-      const dateKey = formatDateKey(startTime)
-      
-      if (!schedule[dateKey]) return
-
-      const startHour = startTime.getHours()
-      const endHour = endTime.getHours()
-
-      // Prioritize explicit shift labels in calendar summaries
-      if (shiftType.includes('opening') || shiftType.includes('open')) {
-        if (!schedule[dateKey].morning.includes(baristaName)) {
-          schedule[dateKey].morning.push(baristaName)
-        }
-        return
-      }
-
-      if (shiftType.includes('closing') || shiftType.includes('close')) {
-        if (!schedule[dateKey].evening.includes(baristaName)) {
-          schedule[dateKey].evening.push(baristaName)
-        }
-        return
-      }
-
-      if (shiftType.includes('shared') || shiftType.includes('support') || shiftType.includes('inter')) {
-        if (!schedule[dateKey].interShift.includes(baristaName)) {
-          schedule[dateKey].interShift.push(baristaName)
-        }
-        return
-      }
-
-      // Determine shift type based on start and end times
-      // Morning shift: starts at 8am, and fallback to 9am for weekend openings
-      if (startHour <= 9 && endHour >= 13 && endHour <= 15) {
-        if (!schedule[dateKey].morning.includes(baristaName)) {
-          schedule[dateKey].morning.push(baristaName)
-        }
-      }
-      // Evening shift: starts around 2pm and ends at or after 8pm
-      else if (startHour >= 13 && startHour <= 15 && endHour >= 20) {
-        if (!schedule[dateKey].evening.includes(baristaName)) {
-          schedule[dateKey].evening.push(baristaName)
-        }
-      }
-      // Inter-shift: starts around noon and ends around 6pm (doesn't span full shifts)
-      else if (startHour >= 11 && startHour <= 13 && endHour >= 17 && endHour <= 19) {
-        if (!schedule[dateKey].interShift.includes(baristaName)) {
-          schedule[dateKey].interShift.push(baristaName)
-        }
-      }
-    })
-
-    return schedule
-  }
-
-  const extractShifts = (events) => {
-    const shifts = []
-    events.forEach(event => {
-      if (!event.start?.dateTime || !event.summary) return
-      const bracketMatch = event.summary.match(/^\[([^,]+),\s*([^\]]+)\]/)
-      if (!bracketMatch) return
-      shifts.push({
-        barista: bracketMatch[1].trim(),
-        start: new Date(event.start.dateTime),
-        end: new Date(event.end.dateTime)
-      })
-    })
-    return shifts
   }
 
   const parseBulkTips = () => {
@@ -465,7 +285,15 @@ function StaffTab({ user, accessToken, setAccessToken }) {
       return
     }
     if (weekShifts.length === 0) {
-      alert('Please load the schedule from calendar first')
+      alert('Please load the schedule from the master schedule first')
+      return
+    }
+    if (scheduleProblems.length > 0) {
+      alert('Finish or remove the half-filled rows in the schedule preview first')
+      return
+    }
+    if (!scheduleConfirmed) {
+      alert('Please check the schedule and confirm it before calculating tips')
       return
     }
 
@@ -612,7 +440,7 @@ function StaffTab({ user, accessToken, setAccessToken }) {
       })
     })
 
-    // Calculate hours and shifts from calendar data
+    // Calculate hours and shifts from the master schedule
     Object.keys(baristaEarnings).forEach(name => {
       const shifts = weekShifts.filter(s => s.barista === name)
       // Every scheduled shift earns a base rate, so working a double in one day
@@ -648,22 +476,24 @@ function StaffTab({ user, accessToken, setAccessToken }) {
   }
 
   // Splits one day's tips into a morning pool and an evening pool, each divided by
-  // the hours a barista actually covered in that window. Weights are normalized
-  // inside the pool, so a day's shares always add up to exactly that day's tips:
-  // an inter-shift barista dilutes the other shares instead of being paid on top of
-  // an already-full split (which is what used to push payouts over 100%).
-  const allocateDayTips = (daySchedule, dayTip) => {
+  // the hours a barista actually covered in that window (from the shift's real
+  // times, so a 12-2 middle cover or a shortened opening counts exactly). Weights
+  // are normalized inside the pool, so a day's shares always add up to exactly
+  // that day's tips: a shared or middle barista dilutes the other shares instead
+  // of being paid on top of an already-full split.
+  const allocateDayTips = (dayShifts, dayTip) => {
     const morningWeights = {}
     const eveningWeights = {}
     const addWeight = (weights, name, hours) => {
-      weights[name] = (weights[name] || 0) + hours
+      if (hours > 0) weights[name] = (weights[name] || 0) + hours
     }
+    const hoursBetween = (from, to) => (to - from) / (1000 * 60 * 60)
 
-    daySchedule.morning.forEach(name => addWeight(morningWeights, name, MORNING_HOURS))
-    daySchedule.evening.forEach(name => addWeight(eveningWeights, name, EVENING_HOURS))
-    daySchedule.interShift.forEach(name => {
-      addWeight(morningWeights, name, INTER_MORNING_OVERLAP)
-      addWeight(eveningWeights, name, INTER_EVENING_OVERLAP)
+    dayShifts.forEach(shift => {
+      const split = new Date(shift.start)
+      split.setHours(SPLIT_HOUR, 0, 0, 0)
+      addWeight(morningWeights, shift.barista, hoursBetween(shift.start, Math.min(shift.end, split)))
+      addWeight(eveningWeights, shift.barista, hoursBetween(Math.max(shift.start, split), shift.end))
     })
 
     const sumWeights = (weights) => Object.values(weights).reduce((sum, weight) => sum + weight, 0)
@@ -700,6 +530,14 @@ function StaffTab({ user, accessToken, setAccessToken }) {
       alert('Please load schedule and enter tip data first')
       return
     }
+    if (scheduleProblems.length > 0) {
+      alert('Finish or remove the half-filled rows in the schedule preview first')
+      return
+    }
+    if (!scheduleConfirmed) {
+      alert('Please check the schedule and confirm it before calculating tips')
+      return
+    }
 
     const baristaEarnings = {}
     const earningsFor = (name) => {
@@ -714,11 +552,10 @@ function StaffTab({ user, accessToken, setAccessToken }) {
     let unallocatedDays = 0
 
     Object.keys(weekSchedule).forEach(date => {
-      const daySchedule = weekSchedule[date]
       const dayTip = dailyTips[date] || 0
       scheduledTips += dayTip
 
-      const { shares, unallocated } = allocateDayTips(daySchedule, dayTip)
+      const { shares, unallocated } = allocateDayTips(weekSchedule[date], dayTip)
       Object.entries(shares).forEach(([name, share]) => {
         earningsFor(name).tips += share
       })
@@ -727,19 +564,13 @@ function StaffTab({ user, accessToken, setAccessToken }) {
         unallocatedDays += 1
       }
 
-      // Hours and shifts are counted off the schedule, independent of the tip split
-      daySchedule.morning.forEach(name => {
-        earningsFor(name).hours += MORNING_HOURS
-        earningsFor(name).shifts += 1
-      })
-      daySchedule.evening.forEach(name => {
-        earningsFor(name).hours += EVENING_HOURS
-        earningsFor(name).shifts += 1
-      })
-      daySchedule.interShift.forEach(name => {
-        earningsFor(name).hours += INTER_SHIFT_HOURS
-        earningsFor(name).shifts += 1
-      })
+    })
+
+    // Hours and shifts are counted off the schedule's real shift times,
+    // independent of the tip split
+    weekShifts.forEach(shift => {
+      earningsFor(shift.barista).hours += (shift.end - shift.start) / (1000 * 60 * 60)
+      earningsFor(shift.barista).shifts += 1
     })
 
     // Tips parsed for a date outside the loaded week can never reach a barista.
@@ -854,6 +685,10 @@ function StaffTab({ user, accessToken, setAccessToken }) {
       
       await setDoc(doc(db, 'tipReports', docId), {
         ...calculation,
+        scheduleSource: 'master-schedule',
+        scheduleAdjustments,
+        scheduleConfirmedAt: new Date(),
+        scheduleConfirmedBy: user.uid,
         createdAt: new Date(),
         createdBy: user.uid
       })
@@ -1166,18 +1001,6 @@ function StaffTab({ user, accessToken, setAccessToken }) {
         </div>
       </div>
 
-      {!accessToken && (
-        <div className="google-connect-banner">
-          <p>
-            Tip reports read the shift schedule from Google Calendar. Your calendar access
-            has expired or was never granted on this device.
-          </p>
-          <button onClick={connectGoogleCalendar} disabled={connectingGoogle}>
-            {connectingGoogle ? 'Connecting...' : 'Connect Google Calendar'}
-          </button>
-        </div>
-      )}
-
       {view === 'calculator' && (
         <div className="calculator-section">
           <h3>Weekly Tip Calculator</h3>
@@ -1190,10 +1013,15 @@ function StaffTab({ user, accessToken, setAccessToken }) {
               onChange={(e) => {
                 const sunday = getSundayOfWeek(parseDateInput(e.target.value))
                 setSelectedWeek(formatDateKey(sunday))
+                // A schedule loaded for another week must not be paid against this one
+                setLoadedDays([])
+                setScheduleDays([])
+                setScheduleConfirmed(false)
+                setCalculation(null)
               }}
             />
             <button onClick={fetchWeekSchedule} disabled={loading}>
-              {loading ? 'Loading...' : 'Load Schedule from Calendar'}
+              {loading ? 'Loading...' : 'Load Schedule from Master Schedule'}
             </button>
           </div>
 
@@ -1201,14 +1029,98 @@ function StaffTab({ user, accessToken, setAccessToken }) {
             <>
               <div className="schedule-preview">
                 <h4>Schedule Preview</h4>
-                {Object.keys(weekSchedule).map(date => (
-                  <div key={date} className="day-schedule">
-                    <strong>{parseDateInput(date).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })}</strong>
-                    <div>Morning (8am-2pm): {weekSchedule[date].morning.join(', ') || 'None'}</div>
-                    <div>Evening (2pm-9pm): {weekSchedule[date].evening.join(', ') || 'None'}</div>
-                    <div>Inter-shift (12pm-6pm): {weekSchedule[date].interShift.join(', ') || 'None'}</div>
+                {scheduleDays.map(day => (
+                  <div key={day.date} className="day-schedule">
+                    <strong>{parseDateInput(day.date).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })}</strong>
+                    {day.shifts.map(shift => (
+                      <div key={shift.shift} className="preview-shift">
+                        <div>
+                          {shift.shift[0].toUpperCase() + shift.shift.slice(1)} ({formatClock(shift.start)}-{formatClock(shift.end)}{shift.custom ? ', changed hours' : ''}):{' '}
+                          {shift.people.length === 0 && 'None'}
+                          <button
+                            type="button"
+                            className="preview-add-person"
+                            title="Someone else worked part or all of this shift"
+                            onClick={() => changeShiftPeople(day.date, shift.shift, (people, s) => [...people, { name: '', start: s.start, end: s.end }])}
+                          >
+                            + person
+                          </button>
+                        </div>
+                        {shift.people.map((person, index) => (
+                          <div key={index} className="preview-person">
+                            <select
+                              value={person.name}
+                              onChange={(e) => changeShiftPeople(day.date, shift.shift, people => people.map((p, i) => i === index ? { ...p, name: e.target.value } : p))}
+                            >
+                              <option value="">Who?</option>
+                              {person.name && !baristas.some(b => b.name === person.name) && <option value={person.name}>{person.name}</option>}
+                              {baristas.filter(b => b.active !== false || b.name === person.name).map(b => (
+                                <option key={b.id} value={b.name}>{b.name}</option>
+                              ))}
+                            </select>
+                            <input
+                              type="time"
+                              step="900"
+                              value={person.start}
+                              aria-label="Started"
+                              onChange={(e) => changeShiftPeople(day.date, shift.shift, people => people.map((p, i) => i === index ? { ...p, start: e.target.value } : p))}
+                            />
+                            <span>-</span>
+                            <input
+                              type="time"
+                              step="900"
+                              value={person.end}
+                              aria-label="Finished"
+                              onChange={(e) => changeShiftPeople(day.date, shift.shift, people => people.map((p, i) => i === index ? { ...p, end: e.target.value } : p))}
+                            />
+                            <button
+                              type="button"
+                              className="preview-remove-person"
+                              title="Remove from this shift (for the tip calculation only)"
+                              onClick={() => changeShiftPeople(day.date, shift.shift, people => people.filter((_, i) => i !== index))}
+                            >
+                              ✕
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+                    ))}
                   </div>
                 ))}
+              </div>
+
+              <div className="schedule-check">
+                <p className="by-hour-description">
+                  If two people split a shift - side by side, or one took over partway - use "+ person" and set each
+                  one's hours. Changes here only affect this tip calculation, not the schedule.
+                </p>
+                {openIssues.length + scheduleProblems.length > 0 ? (
+                  <div className="unmatched-warning">
+                    <strong>Check before paying out:</strong>
+                    <ul>
+                      {scheduleProblems.map(problem => <li key={problem}>{problem}</li>)}
+                      {openIssues.map(issue => <li key={issue.text}>{issue.text}</li>)}
+                    </ul>
+                  </div>
+                ) : (
+                  <p>No open shifts or unknown baristas this week.</p>
+                )}
+                {scheduleAdjustments.length > 0 && (
+                  <p>
+                    {scheduleAdjustments.length} shift{scheduleAdjustments.length === 1 ? '' : 's'} adjusted for this calculation.{' '}
+                    <button type="button" onClick={() => { setScheduleDays(loadedDays); setScheduleConfirmed(false); setCalculation(null) }}>
+                      Undo adjustments
+                    </button>
+                  </p>
+                )}
+                <label>
+                  <input
+                    type="checkbox"
+                    checked={scheduleConfirmed}
+                    onChange={(e) => setScheduleConfirmed(e.target.checked)}
+                  />
+                  {' '}This schedule matches who actually worked this week
+                </label>
               </div>
 
               <div className="tip-input-section">
@@ -1374,16 +1286,13 @@ function StaffTab({ user, accessToken, setAccessToken }) {
                 onChange={(e) => setNewBarista({...newBarista, basePay: e.target.value})}
               />
               <button onClick={addBarista} className="add-btn">Add Barista</button>
-              <button onClick={() => syncBaristasFromCurrentMonth(true)} className="add-btn" disabled={syncingBaristas}>
-                {syncingBaristas ? 'Syncing...' : 'Sync From Current Month Calendar'}
-              </button>
             </div>
           </div>
 
           <div className="barista-list">
             <h4>Current Baristas ({baristas.length})</h4>
             {baristas.length === 0 ? (
-              <p className="empty-state">No baristas found yet. Use “Sync From Current Month Calendar” to auto-load scheduled baristas.</p>
+              <p className="empty-state">No baristas found yet. Add them above.</p>
             ) : (
               <table className="barista-table">
                 <thead>
