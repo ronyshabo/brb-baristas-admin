@@ -281,7 +281,7 @@ function StaffTab({ user }) {
   const parseSquareAndCalculate = () => {
     const raw = squareData.trim()
     if (!raw) {
-      alert('Please paste Square transaction data first')
+      alert('Please paste the card transaction report first')
       return
     }
     if (weekShifts.length === 0) {
@@ -306,6 +306,19 @@ function StaffTab({ user }) {
     // Check if data rows (not just header) are also tab-separated
     const headerLineIdx = lines.findIndex(l => /\t/.test(l) && /date/i.test(l) && /tip/i.test(l))
     const hasTabData = headerLineIdx >= 0 && lines.slice(headerLineIdx + 1, headerLineIdx + 5).some(l => /\t/.test(l))
+
+    // The card report prints the year only in its header ("Sunday, October 25, 2026
+    // 12:00 AM - ..."), and a row like "10/25 9:15 AM" alone reads as 2001. Rows
+    // without a year get the loaded week's year (the end's, for a Dec-Jan week).
+    const loadedStart = parseDateInput(scheduleDays[0].date)
+    const loadedEnd = parseDateInput(scheduleDays[scheduleDays.length - 1].date)
+    const parseTxDate = (text) => {
+      const date = new Date(text)
+      if (isNaN(date.getTime()) || /\d{4}|\d{1,2}\/\d{1,2}\/\d{2}\b/.test(text)) return date
+      date.setFullYear(loadedStart.getFullYear())
+      if (date < loadedStart) date.setFullYear(loadedEnd.getFullYear())
+      return date
+    }
 
     const transactions = []
 
@@ -335,7 +348,7 @@ function StaffTab({ user }) {
         let dateStr = cols[dateIdx]
         if (!dateStr) continue
         if (timeIdx >= 0 && cols[timeIdx]) dateStr = `${dateStr} ${cols[timeIdx]}`
-        const parsedDate = new Date(dateStr)
+        const parsedDate = parseTxDate(dateStr)
         if (isNaN(parsedDate.getTime())) continue
         const tipAmount = parseFloat((cols[tipIdx] || '').replace(/[$,]/g, ''))
         if (isNaN(tipAmount) || tipAmount <= 0) continue
@@ -365,7 +378,7 @@ function StaffTab({ user }) {
         const timePart = lines[i]
         i++
 
-        const parsedDate = new Date(`${datePart} ${timePart}`)
+        const parsedDate = parseTxDate(`${datePart} ${timePart}`)
         if (isNaN(parsedDate.getTime())) continue
 
         // Scan forward to find the $ amount lines
@@ -392,11 +405,11 @@ function StaffTab({ user }) {
     }
 
     if (transactions.length === 0) {
-      alert('No valid transactions with tips found. Make sure the pasted data includes the full Square report with dates, times, and dollar amounts.')
+      alert('No valid transactions with tips found. Make sure the pasted data includes the full card report with dates, times, and dollar amounts.')
       return
     }
 
-    // Square dates vs the loaded week: a paste from another week, or a week with
+    // Report dates vs the loaded week: a paste from another week, or a week with
     // nobody on the schedule, would otherwise just show up as "unmatched".
     const loadedFirst = scheduleDays[0].date
     const loadedLast = scheduleDays[scheduleDays.length - 1].date
@@ -405,7 +418,7 @@ function StaffTab({ user }) {
     const txLast = txKeys[txKeys.length - 1]
     const outsideWeek = txKeys.filter(key => key < loadedFirst || key > loadedLast).length
     if (outsideWeek === transactions.length) {
-      alert(`The Square data is from ${txFirst} to ${txLast}, but the loaded schedule is the week of ${loadedFirst} to ${loadedLast}. Pick the week that matches the Square data and load the schedule again.`)
+      alert(`The card report was read as ${txFirst} to ${txLast}, but the loaded schedule is the week of ${loadedFirst} to ${loadedLast}. Pick the week that matches the report and load the schedule again.`)
       return
     }
     const staffedDays = new Set(weekShifts.map(shift => formatDateKey(shift.start)))
@@ -1197,7 +1210,7 @@ function StaffTab({ user }) {
                 {tipInputMethod === 'byHour' && (
                   <div className="bulk-entry">
                     <p className="by-hour-description">
-                      Paste the whole card/Square transaction export below — no typing per hour, just
+                      Paste the whole card transaction report below — no typing per hour, just
                       copy the report. It needs <strong>Date</strong> and <strong>Tip</strong> columns, plus
                       a <strong>Time</strong> column if you have one. Each transaction is split evenly among
                       whoever was clocked on at that minute, so the payout always adds back up to the
@@ -1205,7 +1218,7 @@ function StaffTab({ user }) {
                       that day's crew, weighted by hours worked.
                     </p>
                     <textarea 
-                      placeholder="Paste Square transaction report here (with Date and Tip columns)..."
+                      placeholder="Paste the card transaction report here (with Date and Tip columns)..."
                       value={squareData}
                       onChange={(e) => setSquareData(e.target.value)}
                       rows={10}
