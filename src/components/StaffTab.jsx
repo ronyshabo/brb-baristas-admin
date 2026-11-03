@@ -298,6 +298,9 @@ function StaffTab({ user }) {
     }
 
     const lines = raw.split('\n').map(l => l.trim()).filter(Boolean)
+    // The same lines with their tabs kept: trimming drops a leading empty cell
+    // and shifts every column left, so "Date" would read some other column.
+    const tabRows = raw.split('\n').map(l => l.replace(/^[ \r]+|[ \r]+$/g, '')).filter(l => l.trim())
 
     // Detect format: tab-separated single-line rows vs multi-line (one cell per line)
     // Check if data rows (not just header) are also tab-separated
@@ -310,8 +313,8 @@ function StaffTab({ user }) {
       // Tab-separated format: each row is a single line
       let headerIndex = -1
       let headers = []
-      for (let i = 0; i < Math.min(lines.length, 20); i++) {
-        const cols = lines[i].split('\t').map(c => c.trim().toLowerCase())
+      for (let i = 0; i < Math.min(tabRows.length, 20); i++) {
+        const cols = tabRows[i].split('\t').map(c => c.trim().toLowerCase())
         if (cols.includes('date') && cols.includes('tip')) {
           headerIndex = i
           headers = cols
@@ -326,8 +329,8 @@ function StaffTab({ user }) {
       const tipIdx = headers.indexOf('tip')
       const timeIdx = headers.indexOf('time')
 
-      for (let i = headerIndex + 1; i < lines.length; i++) {
-        const cols = lines[i].split('\t').map(c => c.trim())
+      for (let i = headerIndex + 1; i < tabRows.length; i++) {
+        const cols = tabRows[i].split('\t').map(c => c.trim())
         if (cols.length <= Math.max(dateIdx, tipIdx)) continue
         let dateStr = cols[dateIdx]
         if (!dateStr) continue
@@ -392,6 +395,21 @@ function StaffTab({ user }) {
       alert('No valid transactions with tips found. Make sure the pasted data includes the full Square report with dates, times, and dollar amounts.')
       return
     }
+
+    // Square dates vs the loaded week: a paste from another week, or a week with
+    // nobody on the schedule, would otherwise just show up as "unmatched".
+    const loadedFirst = scheduleDays[0].date
+    const loadedLast = scheduleDays[scheduleDays.length - 1].date
+    const txKeys = transactions.map(tx => formatDateKey(tx.date)).sort()
+    const txFirst = txKeys[0]
+    const txLast = txKeys[txKeys.length - 1]
+    const outsideWeek = txKeys.filter(key => key < loadedFirst || key > loadedLast).length
+    if (outsideWeek === transactions.length) {
+      alert(`The Square data is from ${txFirst} to ${txLast}, but the loaded schedule is the week of ${loadedFirst} to ${loadedLast}. Pick the week that matches the Square data and load the schedule again.`)
+      return
+    }
+    const staffedDays = new Set(weekShifts.map(shift => formatDateKey(shift.start)))
+    const unstaffedDays = [...new Set(txKeys.filter(key => key >= loadedFirst && key <= loadedLast && !staffedDays.has(key)))]
 
     // Calculate by-hour tips
     const baristaEarnings = {}
@@ -472,7 +490,11 @@ function StaffTab({ user }) {
       isByHour: true
     })
 
-    alert(`Parsed ${transactions.length} transactions with tips. ${unmatchedCount > 0 ? `${unmatchedCount} transactions ($${unmatchedTips.toFixed(2)}) could not be matched to any barista shift.` : 'All matched to shifts.'}`)
+    const reasons = [
+      outsideWeek > 0 && `${outsideWeek} are dated outside ${loadedFirst} to ${loadedLast}`,
+      unstaffedDays.length > 0 && `nobody is on the schedule for ${unstaffedDays.join(', ')}`,
+    ].filter(Boolean)
+    alert(`Parsed ${transactions.length} transactions with tips (${txFirst} to ${txLast}). ${unmatchedCount > 0 ? `${unmatchedCount} transactions ($${unmatchedTips.toFixed(2)}) could not be matched to any barista shift${reasons.length ? `: ${reasons.join('; ')}` : ''}.` : 'All matched to shifts.'}`)
   }
 
   // Splits one day's tips into a morning pool and an evening pool, each divided by
